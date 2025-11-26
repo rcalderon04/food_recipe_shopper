@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Recipe to Amazon Fresh</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+
+<body>
+    <div class="container">
+        <header>
+            <h1>Recipe to Amazon Fresh</h1>
+            <p>Turn any recipe into a shopping list instantly.</p>
+        </header>
+
+        <section class="input-section">
+            <select id="storefront-select" title="Select Storefront">
+                <option value="fresh">Amazon Fresh</option>
+                <option value="wholefoods">Whole Foods</option>
+                <option value="amazon">Amazon.com</option>
+            </select>
+            <input type="text" id="recipe-url" placeholder="Paste recipe URL here..."
+                value="https://www.allrecipes.com/recipe/23600/worlds-best-lasagna/">
+            <button id="parse-btn" onclick="parseRecipe()">Get Ingredients</button>
+        </section>
+
+        <div id="loading" class="hidden">
+            <div class="spinner"></div>
+            <p id="loading-text">Parsing recipe...</p>
+        </div>
+
+        <div id="results-section" class="hidden">
+            <div class="results-header">
+                <h2>Ingredients & Products</h2>
+                <div class="cart-summary">
+                    <span id="selected-count">0</span> items selected
+                    <span id="total-cost">($0.00)</span>
+                </div>
+            </div>
+
+            <div id="ingredients-list">
+                <!-- Ingredients will be populated here -->
+            </div>
+        </div>
+
+        <div id="floating-cart" class="hidden">
+            <button onclick="addToCart()" id="add-to-cart-btn">
+                Add to Cart
+            </button>
+        </div>
+    </div>
+
+    <!-- Template for an ingredient row -->
+    <template id="ingredient-template">
+        <div class="ingredient-row">
+            <div class="ingredient-info">
+                <h3 class="ingredient-name"></h3>
+                <p class="ingredient-original"></p>
+                <div class="status-indicator loading">Waiting...</div>
+            </div>
+            <div class="product-options hidden">
+                <!-- Product cards go here -->
+            </div>
+        </div>
+    </template>
+
+    <!-- Template for a product card -->
+    <template id="product-card-template">
+        <label class="product-card">
+            <input type="radio" name="group-name" class="product-select">
+            <div class="card-content">
+                <div class="product-img-container">
+                    <img src="" alt="Product" class="product-img">
+                </div>
+                <div class="product-details">
+                    <div class="confidence-badge"></div>
+                    <h4 class="product-title"></h4>
+                    <div class="price-row">
+                        <span class="price"></span>
+                        <span class="quantity-badge hidden"></span>
+                    </div>
+                    <div class="quantity-controls">
+                        <button type="button" class="qty-btn minus">-</button>
+                        <input type="number" class="qty-input" value="1" min="0" max="10">
+                        <button type="button" class="qty-btn plus">+</button>
+                    </div>
+                </div>
+            </div>
+        </label>
+    </template>
+
+    <script>
+        let ingredientsData = [];
+        let selectedItems = new Map();
+
+        async function parseRecipe() {
+            const url = document.getElementById('recipe-url').value;
+            if (!url) return alert('Please enter a URL');
+
+            // Reset UI
+            document.getElementById('results-section').classList.add('hidden');
+            document.getElementById('ingredients-list').innerHTML = '';
+            document.getElementById('loading').classList.remove('hidden');
+            document.getElementById('parse-btn').disabled = true;
+            document.getElementById('floating-cart').classList.add('hidden');
+            selectedItems.clear();
+            updateCartSummary();
+
+            try {
+                const response = await fetch('/api/parse', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ url })
+                });
+
+                const data = await response.json();
+
+                if (data.error) throw new Error(data.error);
+
+                document.getElementById('loading').classList.add('hidden');
+                document.getElementById('results-section').classList.remove('hidden');
+                document.getElementById('floating-cart').classList.remove('hidden');
+
+                // 1. Create all rows first
+                data.ingredients.forEach((ing, index) => {
+                    createIngredientRow(ing, index);
+                });
+
+                // 2. Process them sequentially
+                processIngredientsSequentially(data.ingredients);
+
+            } catch (e) {
+                alert('Error: ' + e.message);
+                document.getElementById('loading').classList.add('hidden');
+            } finally {
+                document.getElementById('parse-btn').disabled = false;
+            }
+        }
+
+        async function processIngredientsSequentially(ingredients) {
+            for (let i = 0; i < ingredients.length; i++) {
+                const ing = ingredients[i];
+                // Scroll row into view
+                const row = document.getElementById(`ing-row-${i}`);
+                if (row) row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+                await searchIngredient(ing, i);
+
+                // Add a small delay between searches to be nice to the backend/Amazon
+                if (i < ingredients.length - 1) {
+                    await new Promise(r => setTimeout(r, 2000));
+                }
+            }
+        }
+
+        function createIngredientRow(ingredientText, index) {
+            const template = document.getElementById('ingredient-template');
+            const clone = template.content.cloneNode(true);
+
+            const row = clone.querySelector('.ingredient-row');
+            row.id = `ing-row-${index}`;
+
+            clone.querySelector('.ingredient-name').textContent = ingredientText.split(' ').slice(0, 3).join(' ') + '...'; // Temp name
+            clone.querySelector('.ingredient-original').textContent = ingredientText;
+
+            document.getElementById('ingredients-list').appendChild(clone);
+        }
+
+        async function searchIngredient(ingredientText, index) {
+            const row = document.getElementById(`ing-row-${index}`);
+            const statusIndicator = row.querySelector('.status-indicator');
+
+            try {
+                const storefront = document.getElementById('storefront-select').value;
+                console.log(`Searching for: ${ingredientText} in ${storefront}`);
+                statusIndicator.textContent = 'Searching Amazon...';
+                statusIndicator.classList.remove('error', 'hidden');
+                statusIndicator.classList.add('loading');
+
+                const response = await fetch('/api/search', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        ingredient: ingredientText,
+                        storefront: storefront
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+
+                const data = await response.json();
+                console.log(`Search results for "${ingredientText}":`, data);
+
+                if (data.error) {
+                    statusIndicator.textContent = `Error: ${data.error}`;
+                    statusIndicator.classList.remove('loading');
+                    statusIndicator.classList.add('error');
+                    console.error(`Search error for "${ingredientText}":`, data.error);
+                    return;
+                }
+
+                if (!data.options || data.options.length === 0) {
+                    statusIndicator.textContent = 'No products found';
+                    statusIndicator.classList.remove('loading');
+                    statusIndicator.classList.add('error');
+                    return;
+                }
+
+                // Update row info
+                row.querySelector('.ingredient-name').textContent = data.query;
+                statusIndicator.classList.add('hidden');
+
+                const optionsContainer = row.querySelector('.product-options');
+                optionsContainer.classList.remove('hidden');
+
+                console.log(`Rendering ${data.options.length} options for "${ingredientText}"`);
+
+                // Render options
+                data.options.forEach((opt, optIndex) => {
+                    const cardTemplate = document.getElementById('product-card-template');
+                    const cardClone = cardTemplate.content.cloneNode(true);
+
+                    const radio = cardClone.querySelector('input');
+                    radio.name = `ing-${index}`;
+                    radio.value = opt.asin;
+                    radio.checked = optIndex === 0; // Select first by default
+
+                    // Store item data
+                    const itemData = {
+                        ...opt,
+                        ingredient_index: index
+                    };
+
+                    radio.onchange = () => {
+                        selectedItems.set(index, itemData);
+                        updateCartSummary();
+                    };
+
+                    // Initial selection
+                    if (optIndex === 0) {
+                        selectedItems.set(index, itemData);
+                        updateCartSummary();
+                    }
+
+                    const img = cardClone.querySelector('.product-img');
+                    if (opt.image) {
+                        img.src = opt.image;
+                    } else {
+                        // Placeholder if no image
+                        img.src = 'https://via.placeholder.com/80?text=No+Img';
+                    }
+
+                    cardClone.querySelector('.product-title').textContent = opt.title;
+
+                    // Price display
+                    let priceDisplay = `$${opt.price}`;
+                    if (opt.quantity_recommendation > 1) {
+                        priceDisplay = `$${opt.price} ea (Total: $${(opt.total_price).toFixed(2)})`;
+                        const badge = cardClone.querySelector('.quantity-badge');
+                        badge.textContent = `Buy ${opt.quantity_recommendation}`;
+                        badge.classList.remove('hidden');
+                    }
+                    cardClone.querySelector('.price').textContent = priceDisplay;
+
+                    // Confidence badge
+                    const badge = cardClone.querySelector('.confidence-badge');
+                    badge.textContent = `${opt.confidence}% Match`;
+                    if (opt.confidence > 80) badge.classList.add('high');
+                    else if (opt.confidence > 50) badge.classList.add('medium');
+                    else badge.classList.add('low');
+
+                    // Quantity controls
+                    const qtyInput = cardClone.querySelector('.qty-input');
+                    const minusBtn = cardClone.querySelector('.qty-btn.minus');
+                    const plusBtn = cardClone.querySelector('.qty-btn.plus');
+
+                    // Set initial quantity
+                    qtyInput.value = opt.quantity_recommendation || 1;
+                    itemData.quantity = parseInt(qtyInput.value);
+
+                    const updateQuantity = (newQty) => {
+                        if (newQty < 0) newQty = 0;
+                        qtyInput.value = newQty;
+                        itemData.quantity = newQty;
+
+                        // Update total price display
+                        if (newQty === 0) {
+                            cardClone.querySelector('.price').textContent = 'Skipped';
+                            cardClone.classList.add('skipped');
+                        } else {
+                            cardClone.classList.remove('skipped');
+                            let unitPrice = opt.price;
+                            if (typeof unitPrice === 'string') {
+                                unitPrice = parseFloat(unitPrice.replace('$', '').replace(',', ''));
+                            }
+                            const total = (unitPrice * newQty).toFixed(2);
+                            cardClone.querySelector('.price').textContent = `$${unitPrice} ea (Total: $${total})`;
+                            itemData.total_price = parseFloat(total);
+                        }
+
+                        // Update map if selected
+                        if (radio.checked) {
+                            selectedItems.set(index, itemData);
+                            updateCartSummary();
+                        }
+                    };
+
+                    minusBtn.onclick = (e) => {
+                        e.preventDefault();
+                        updateQuantity(parseInt(qtyInput.value) - 1);
+                    };
+
+                    plusBtn.onclick = (e) => {
+                        e.preventDefault();
+                        updateQuantity(parseInt(qtyInput.value) + 1);
+                    };
+
+                    qtyInput.onchange = (e) => {
+                        updateQuantity(parseInt(e.target.value));
+                    };
+
+                    optionsContainer.appendChild(cardClone);
+                });
+
+                console.log(`Successfully rendered products for "${ingredientText}"`);
+
+            } catch (e) {
+                console.error(`Error searching for "${ingredientText}":`, e);
+                statusIndicator.textContent = `Error: ${e.message}`;
+                statusIndicator.classList.remove('loading');
+                statusIndicator.classList.add('error');
+            }
+        }
+
+        function updateCartSummary() {
+            const count = selectedItems.size;
+            let total = 0;
+            selectedItems.forEach(item => {
+                if (typeof item.total_price === 'number') {
+                    total += item.total_price;
+                }
+            });
+
+            document.getElementById('selected-count').textContent = count;
+            document.getElementById('total-cost').textContent = `($${total.toFixed(2)})`;
+        }
+
+        async function addToCart() {
+            const btn = document.getElementById('add-to-cart-btn');
+            const originalText = btn.textContent;
+            btn.disabled = true;
+            btn.textContent = 'Adding items to Amazon Cart...';
+
+            const items = Array.from(selectedItems.values()).map(item => ({
+                asin: item.asin,
+                quantity: item.quantity,
+                title: item.title
+            }));
+
+            try {
+                const response = await fetch('/api/cart', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ items })
+                });
+
+                const data = await response.json();
+
+                // Show results
+                let successCount = data.results.filter(r => r.success).length;
+                alert(`Added ${successCount} of ${items.length} items to cart! Check the terminal for details.`);
+
+            } catch (e) {
+                alert('Error adding to cart: ' + e.message);
+            } finally {
+                btn.disabled = false;
+                btn.textContent = originalText;
+            }
+        }
+    </script>
+</body>
+
+</html>

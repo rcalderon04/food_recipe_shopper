@@ -1,0 +1,7 @@
+playwright
+beautifulsoup4
+requests
+extruct
+html-text
+rapidfuzz
+flask
