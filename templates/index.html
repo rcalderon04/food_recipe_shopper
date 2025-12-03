@@ -17,14 +17,22 @@
         </header>
 
         <section class="input-section">
-            <select id="storefront-select" title="Select Storefront">
-                <option value="fresh">Amazon Fresh</option>
-                <option value="wholefoods">Whole Foods</option>
-                <option value="amazon">Amazon.com</option>
-            </select>
-            <input type="text" id="recipe-url" placeholder="Paste recipe URL here..."
-                value="https://www.allrecipes.com/recipe/23600/worlds-best-lasagna/">
-            <button id="parse-btn" onclick="parseRecipe()">Get Ingredients</button>
+            <div class="controls-row">
+                <select id="storefront-select" title="Select Storefront">
+                    <option value="fresh">Amazon Fresh</option>
+                    <option value="wholefoods">Whole Foods</option>
+                    <option value="amazon">Amazon.com</option>
+                </select>
+                <label class="checkbox-container" title="Run browser in background (faster)">
+                    <input type="checkbox" id="headless-checkbox">
+                    <span>Headless Mode</span>
+                </label>
+            </div>
+            <div class="url-row">
+                <input type="text" id="recipe-url" placeholder="Paste recipe URL here..."
+                    value="https://www.allrecipes.com/recipe/23600/worlds-best-lasagna/">
+                <button id="parse-btn" onclick="parseRecipe()">Get Ingredients</button>
+            </div>
         </section>
 
         <div id="loading" class="hidden">
@@ -76,8 +84,14 @@
                     <img src="" alt="Product" class="product-img">
                 </div>
                 <div class="product-details">
-                    <div class="confidence-badge"></div>
+                    <div class="badges-row">
+                        <div class="confidence-badge"></div>
+                        <div class="department-badge hidden"></div>
+                    </div>
                     <h4 class="product-title"></h4>
+                    <a href="#" class="product-link" target="_blank" rel="noopener noreferrer"
+                        style="font-size: 0.75rem; color: #007185; text-decoration: none; margin-bottom: 0.25rem; display: inline-block;">View
+                        on Amazon →</a>
                     <div class="price-row">
                         <span class="price"></span>
                         <span class="quantity-badge hidden"></span>
@@ -87,6 +101,7 @@
                         <input type="number" class="qty-input" value="1" min="0" max="10">
                         <button type="button" class="qty-btn plus">+</button>
                     </div>
+                    <div class="item-error-message hidden"></div>
                 </div>
             </div>
         </label>
@@ -175,7 +190,8 @@
 
             try {
                 const storefront = document.getElementById('storefront-select').value;
-                console.log(`Searching for: ${ingredientText} in ${storefront}`);
+                const headless = document.getElementById('headless-checkbox').checked;
+                console.log(`Searching for: ${ingredientText} in ${storefront} (Headless: ${headless})`);
                 statusIndicator.textContent = 'Searching Amazon...';
                 statusIndicator.classList.remove('error', 'hidden');
                 statusIndicator.classList.add('loading');
@@ -185,7 +201,8 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         ingredient: ingredientText,
-                        storefront: storefront
+                        storefront: storefront,
+                        headless: headless
                     })
                 });
 
@@ -224,6 +241,7 @@
                 data.options.forEach((opt, optIndex) => {
                     const cardTemplate = document.getElementById('product-card-template');
                     const cardClone = cardTemplate.content.cloneNode(true);
+                    const cardRoot = cardClone.querySelector('.product-card'); // Get the actual element
 
                     const radio = cardClone.querySelector('input');
                     radio.name = `ing-${index}`;
@@ -257,15 +275,24 @@
 
                     cardClone.querySelector('.product-title').textContent = opt.title;
 
-                    // Price display
-                    let priceDisplay = `$${opt.price}`;
-                    if (opt.quantity_recommendation > 1) {
-                        priceDisplay = `$${opt.price} ea (Total: $${(opt.total_price).toFixed(2)})`;
-                        const badge = cardClone.querySelector('.quantity-badge');
-                        badge.textContent = `Buy ${opt.quantity_recommendation}`;
-                        badge.classList.remove('hidden');
+                    // Set product URL link
+                    const productLink = cardClone.querySelector('.product-link');
+                    if (opt.url) {
+                        productLink.href = opt.url;
+                    } else {
+                        // Fallback to ASIN-based URL
+                        productLink.href = `https://www.amazon.com/dp/${opt.asin}`;
                     }
-                    cardClone.querySelector('.price').textContent = priceDisplay;
+
+                    // Department badge
+                    if (opt.department) {
+                        const deptBadge = cardClone.querySelector('.department-badge');
+                        deptBadge.textContent = opt.department;
+                        deptBadge.classList.remove('hidden');
+                        if (opt.department.toLowerCase().includes('fresh')) deptBadge.classList.add('fresh');
+                        else if (opt.department.toLowerCase().includes('whole')) deptBadge.classList.add('wholefoods');
+                        else deptBadge.classList.add('amazon');
+                    }
 
                     // Confidence badge
                     const badge = cardClone.querySelector('.confidence-badge');
@@ -278,10 +305,7 @@
                     const qtyInput = cardClone.querySelector('.qty-input');
                     const minusBtn = cardClone.querySelector('.qty-btn.minus');
                     const plusBtn = cardClone.querySelector('.qty-btn.plus');
-
-                    // Set initial quantity
-                    qtyInput.value = opt.quantity_recommendation || 1;
-                    itemData.quantity = parseInt(qtyInput.value);
+                    const priceEl = cardClone.querySelector('.price'); // Pre-select price element
 
                     const updateQuantity = (newQty) => {
                         if (newQty < 0) newQty = 0;
@@ -290,17 +314,24 @@
 
                         // Update total price display
                         if (newQty === 0) {
-                            cardClone.querySelector('.price').textContent = 'Skipped';
-                            cardClone.classList.add('skipped');
+                            priceEl.textContent = 'Skipped'; // Use pre-selected element
+                            cardRoot.classList.add('skipped'); // Use cardRoot
+                            itemData.total_price = 0;
                         } else {
-                            cardClone.classList.remove('skipped');
+                            cardRoot.classList.remove('skipped'); // Use cardRoot
                             let unitPrice = opt.price;
                             if (typeof unitPrice === 'string') {
                                 unitPrice = parseFloat(unitPrice.replace('$', '').replace(',', ''));
                             }
-                            const total = (unitPrice * newQty).toFixed(2);
-                            cardClone.querySelector('.price').textContent = `$${unitPrice} ea (Total: $${total})`;
-                            itemData.total_price = parseFloat(total);
+                            // Handle N/A price
+                            if (isNaN(unitPrice)) {
+                                priceEl.textContent = opt.price; // Use pre-selected element
+                                itemData.total_price = 0;
+                            } else {
+                                const total = (unitPrice * newQty).toFixed(2);
+                                priceEl.textContent = `$${unitPrice} ea (Total: $${total})`; // Use pre-selected element
+                                itemData.total_price = parseFloat(total);
+                            }
                         }
 
                         // Update map if selected
@@ -309,6 +340,9 @@
                             updateCartSummary();
                         }
                     };
+
+                    // Set initial quantity and calculate price
+                    updateQuantity(opt.quantity_recommendation || 1);
 
                     minusBtn.onclick = (e) => {
                         e.preventDefault();
@@ -332,7 +366,7 @@
             } catch (e) {
                 console.error(`Error searching for "${ingredientText}":`, e);
                 statusIndicator.textContent = `Error: ${e.message}`;
-                statusIndicator.classList.remove('loading');
+                statusIndicator.classList.remove('loading', 'hidden');
                 statusIndicator.classList.add('error');
             }
         }
@@ -356,10 +390,18 @@
             btn.disabled = true;
             btn.textContent = 'Adding items to Amazon Cart...';
 
+            // Clear previous errors
+            document.querySelectorAll('.item-error-message').forEach(el => {
+                el.classList.add('hidden');
+                el.textContent = '';
+            });
+
             const items = Array.from(selectedItems.values()).map(item => ({
                 asin: item.asin,
+                url: item.url,
                 quantity: item.quantity,
-                title: item.title
+                title: item.title,
+                ingredient_index: item.ingredient_index
             }));
 
             try {
@@ -371,9 +413,39 @@
 
                 const data = await response.json();
 
-                // Show results
-                let successCount = data.results.filter(r => r.success).length;
-                alert(`Added ${successCount} of ${items.length} items to cart! Check the terminal for details.`);
+                // Process results
+                let successCount = 0;
+                let errorCount = 0;
+
+                if (data.results) {
+                    data.results.forEach(result => {
+                        if (result.success) {
+                            successCount++;
+                        } else {
+                            errorCount++;
+                            // Find the card for this item
+                            const item = items.find(i => i.asin === result.asin);
+                            if (item) {
+                                const row = document.getElementById(`ing-row-${item.ingredient_index}`);
+                                if (row) {
+                                    const radio = row.querySelector(`input[value="${item.asin}"]`);
+                                    if (radio) {
+                                        const card = radio.closest('.product-card');
+                                        const errorEl = card.querySelector('.item-error-message');
+                                        errorEl.textContent = `Error: ${result.error || 'Failed to add'}`;
+                                        errorEl.classList.remove('hidden');
+                                    }
+                                }
+                            }
+                        }
+                    });
+                }
+
+                if (errorCount === 0) {
+                    alert(`Success! Added ${successCount} items to cart.`);
+                } else {
+                    alert(`Added ${successCount} items. Failed to add ${errorCount} items. Check the red error messages.`);
+                }
 
             } catch (e) {
                 alert('Error adding to cart: ' + e.message);

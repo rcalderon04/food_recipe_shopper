@@ -67,7 +67,7 @@ class AmazonShopper:
                     account_text = account_element.inner_text()
                     if account_text and 'Hello' in account_text:
                         print(f"Already logged in (session restored from cookies): {account_text}")
-                        return
+                        return True
                 except:
                     pass
         except:
@@ -97,11 +97,12 @@ class AmazonShopper:
                     if account_text and 'Hello' in account_text:
                         print(f"✓ Login detected: {account_text}")
                         time.sleep(2)  # Give it a moment to fully load
-                        return
+                        return True
             except:
                 continue
         
         print("⚠️  Login timeout - please ensure you're logged in before using the tool.")
+        return False
 
     def search_item(self, query, storefront='fresh'):
         """
@@ -179,6 +180,89 @@ class AmazonShopper:
                 time.sleep(0.5)
             except:
                 pass
+            
+            # Select the appropriate department from the dropdown
+            department_map = {
+                'fresh': 'Amazon Fresh',
+                'wholefoods': 'Whole Foods Market',
+                'amazon': 'All Departments'
+            }
+            
+            target_department = department_map.get(storefront, 'All Departments')
+            print(f"  Selecting department: {target_department}")
+            
+            try:
+                # Try to find and click the department dropdown
+                dropdown_selectors = [
+                    'select#searchDropdownBox',
+                    '#searchDropdownBox',
+                    'select[name="url"]',
+                    '#nav-search-dropdown-card'
+                ]
+                
+                dropdown = None
+                for selector in dropdown_selectors:
+                    try:
+                        dropdown = self.page.wait_for_selector(selector, timeout=2000)
+                        if dropdown:
+                            break
+                    except:
+                        continue
+                
+                if dropdown:
+                    # Get current selected value
+                    try:
+                        current_value = dropdown.evaluate('el => el.value')
+                        print(f"  Current department: {current_value}")
+                    except:
+                        pass
+                    
+                    # Try to select by visible text first
+                    try:
+                        # Get all options and find the one matching our target department
+                        options = self.page.query_selector_all(f'{dropdown_selectors[0] if dropdown else "select#searchDropdownBox"} option')
+                        
+                        for option in options:
+                            option_text = option.inner_text().strip()
+                            if target_department.lower() in option_text.lower():
+                                option_value = option.get_attribute('value')
+                                print(f"  Found matching option: {option_text} (value: {option_value})")
+                                
+                                # Select the option
+                                dropdown.select_option(value=option_value)
+                                print(f"  ✓ Selected department: {target_department}")
+                                time.sleep(random.uniform(0.3, 0.6))
+                                break
+                    except Exception as e:
+                        print(f"  ⚠ Could not select department by text: {e}")
+                        # Fallback: try selecting by partial match or index
+                        try:
+                            if storefront == 'fresh':
+                                # Try common Fresh department values
+                                for val in ['search-alias=amazonfresh', 'search-alias=amazon-fresh', 'amazonfresh']:
+                                    try:
+                                        dropdown.select_option(value=val)
+                                        print(f"  ✓ Selected Amazon Fresh (fallback)")
+                                        break
+                                    except:
+                                        continue
+                            elif storefront == 'wholefoods':
+                                # Try common Whole Foods department values
+                                for val in ['search-alias=wholefoods', 'search-alias=whole-foods', 'wholefoods']:
+                                    try:
+                                        dropdown.select_option(value=val)
+                                        print(f"  ✓ Selected Whole Foods (fallback)")
+                                        break
+                                    except:
+                                        continue
+                        except Exception as e2:
+                            print(f"  ⚠ Fallback selection also failed: {e2}")
+                else:
+                    print(f"  ⚠ Department dropdown not found, proceeding with default")
+                    
+            except Exception as e:
+                print(f"  ⚠ Error selecting department: {e}")
+                print(f"  Continuing with search anyway...")
             
             # Define selectors for search box and submit button
             search_selectors = [
@@ -341,6 +425,42 @@ class AmazonShopper:
                     if not title:
                         continue
                     
+                    # Extract product URL
+                    product_url = ""
+                    try:
+                        # Try to find the link element (usually wraps the title)
+                        link_selectors = [
+                            'h2 a',
+                            'a.a-link-normal.s-no-outline',
+                            'a.a-link-normal[href*="/dp/"]',
+                            f'a[href*="{asin}"]'
+                        ]
+                        
+                        for link_sel in link_selectors:
+                            try:
+                                link_el = item.query_selector(link_sel)
+                                if link_el:
+                                    href = link_el.get_attribute('href')
+                                    if href:
+                                        # Make sure it's a full URL
+                                        if href.startswith('http'):
+                                            product_url = href
+                                        elif href.startswith('/'):
+                                            product_url = f"https://www.amazon.com{href}"
+                                        else:
+                                            product_url = f"https://www.amazon.com/{href}"
+                                        break
+                            except:
+                                continue
+                        
+                        # Fallback: construct URL from ASIN if we couldn't find the link
+                        if not product_url:
+                            product_url = f"https://www.amazon.com/dp/{asin}"
+                            
+                    except Exception as e:
+                        # Ultimate fallback
+                        product_url = f"https://www.amazon.com/dp/{asin}"
+                    
                     # Try to get price with multiple strategies
                     price = "N/A"
                     try:
@@ -384,11 +504,26 @@ class AmazonShopper:
                     except:
                         pass
                     
+                    # Extract department/storefront info
+                    department = "Amazon.com" # Default
+                    try:
+                        # Check for Fresh/Whole Foods text in the item
+                        # We look for specific indicators usually found in delivery/sold by text
+                        item_text = item.inner_text().lower()
+                        if "amazon fresh" in item_text:
+                            department = "Amazon Fresh"
+                        elif "whole foods" in item_text:
+                            department = "Whole Foods"
+                    except:
+                        pass
+
                     results.append({
                         'title': title,
                         'price': price,
                         'asin': asin,
+                        'url': product_url,
                         'image': image_url,
+                        'department': department,
                         'element': item
                     })
                     
@@ -443,8 +578,15 @@ class AmazonShopper:
         """Adds the given item to the cart, optionally multiple times."""
         print(f"Adding '{item['title']}' to cart (Quantity: {quantity})...")
         try:
-            # Construct URL from ASIN to be robust
-            product_url = f"https://www.amazon.com/dp/{item['asin']}?almBrandId=QW1hem9uIEZyZXNo"
+            # Use the product URL if provided, otherwise construct from ASIN
+            if 'url' in item and item['url']:
+                product_url = item['url']
+                print(f"  Using provided URL: {product_url}")
+            else:
+                # Fallback: Construct URL from ASIN
+                product_url = f"https://www.amazon.com/dp/{item['asin']}?almBrandId=QW1hem9uIEZyZXNo"
+                print(f"  Constructed URL from ASIN: {product_url}")
+            
             self.page.goto(product_url, timeout=15000)
             
             # Check if item is out of stock

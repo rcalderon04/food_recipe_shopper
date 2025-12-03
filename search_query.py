@@ -91,6 +91,27 @@ def create_search_query(ingredient_text):
                 base_name = f"{container_singular} {base_name}"
             break
     
+    # Logic for fresh produce preference
+    # We want to avoid dried/processed versions for these items unless specified
+    fresh_produce = [
+        'parsley', 'cilantro', 'basil', 'mint', 'dill', 'rosemary', 'thyme', # Herbs
+        'spinach', 'kale', 'lettuce', 'arugula', # Greens
+        'carrot', 'celery', 'onion', 'garlic', 'potato', 'tomato', 'pepper', # Veggies
+        'apple', 'banana', 'orange', 'lemon', 'lime' # Fruits
+    ]
+    
+    # Check if it's a fresh produce item and NOT processed/packaged
+    is_processed = any(k in text_lower for k in ['dried', 'frozen', 'canned', 'jar', 'can', 'paste', 'sauce', 'powder', 'ground'])
+    
+    if not is_processed:
+        for item in fresh_produce:
+            # Check if the base name contains the produce item (singular or plural)
+            if (item in base_name or item + 's' in base_name) and 'fresh' not in base_name:
+                # Prepend "fresh" to ensure we get the produce section version
+                # e.g. "fresh parsley" vs "parsley" (which might return dried)
+                base_name = f"fresh {base_name}"
+                break
+
     return base_name.strip()
 
 

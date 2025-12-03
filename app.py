@@ -14,21 +14,50 @@ app = Flask(__name__)
 shopper = None
 shopper_lock = threading.Lock()
 
-def get_shopper():
+def get_shopper(headless_request=False):
     global shopper
+    
+    # Check if we need to restart due to headless change
+    if shopper is not None:
+        if shopper.headless != headless_request:
+            print(f"Switching headless mode from {shopper.headless} to {headless_request}...")
+            try:
+                shopper.close()
+            except:
+                pass
+            shopper = None
+
     if shopper is None:
         print("\n" + "="*70)
-        print("🌐 LAUNCHING BROWSER - Please check for a Chrome window!")
+        print(f"🌐 LAUNCHING BROWSER (Headless: {headless_request})")
         print("="*70 + "\n")
         
         try:
-            shopper = AmazonShopper(headless=False)
+            shopper = AmazonShopper(headless=headless_request)
             shopper.start()
+            
             print("\n" + "="*70)
-            print("🔐 BROWSER OPENED - Checking login status...")
-            print("If you see a login prompt, please log in to Amazon.")
+            print("🔐 Checking login status...")
             print("="*70 + "\n")
-            shopper.login()
+            
+            is_logged_in = shopper.login()
+            
+            # If we requested headless but aren't logged in, we MUST switch to visible
+            if not is_logged_in and headless_request:
+                print("\n" + "!"*70)
+                print("⚠️  LOGIN REQUIRED - Switching to visible mode...")
+                print("!"*70 + "\n")
+                
+                try:
+                    shopper.close()
+                except:
+                    pass
+                
+                # Restart in visible mode
+                shopper = AmazonShopper(headless=False)
+                shopper.start()
+                shopper.login()
+                
         except Exception as e:
             print(f"Error starting shopper: {e}")
             print("Attempting to clean up chrome_user_data and retry...")
@@ -50,7 +79,7 @@ def get_shopper():
                 except Exception as cleanup_error:
                     print(f"Cleanup failed: {cleanup_error}")
             
-            # Retry
+            # Retry (always visible on retry to be safe)
             try:
                 shopper = AmazonShopper(headless=False)
                 shopper.start()
@@ -58,6 +87,7 @@ def get_shopper():
             except Exception as retry_error:
                 print(f"Retry failed: {retry_error}")
                 raise
+
     return shopper
 
 @app.route('/')
@@ -88,7 +118,8 @@ def search_ingredient_endpoint():
     data = request.json
     ingredient_text = data.get('ingredient')
     storefront = data.get('storefront', 'fresh')  # Default to fresh
-    print(f">>> Searching for: {ingredient_text} in {storefront}", flush=True)
+    headless = data.get('headless', False) # Default to visible
+    print(f">>> Searching for: {ingredient_text} in {storefront} (Headless: {headless})", flush=True)
     
     if not ingredient_text:
         return jsonify({'error': 'Ingredient text is required'}), 400
@@ -111,14 +142,47 @@ def search_ingredient_endpoint():
         # 3. Search on Amazon (thread-safe access)
         print(f"  Acquiring shopper lock...")
         with shopper_lock:
-            print(f"  Getting shopper instance...")
-            s = get_shopper()
-            print(f"  Performing search...")
-            results = s.search_item(query, storefront=storefront)
+            global shopper
+            try:
+                print(f"  Getting shopper instance...")
+                s = get_shopper(headless_request=headless)
+                print(f"  Performing search in {storefront}...")
+                results = s.search_item(query, storefront=storefront)
+            except Exception as e:
+                print(f"  ⚠️ Error during search: {e}")
+                print("  Invalidating shopper and retrying...")
+                try:
+                    if shopper:
+                        shopper.close()
+                except:
+                    pass
+                shopper = None
+                
+                # Retry once
+                print("  Getting new shopper instance...")
+                s = get_shopper(headless_request=headless)
+                print(f"  Retrying search in {storefront}...")
+                results = s.search_item(query, storefront=storefront)
+
             print(f"  Got {len(results)} results")
             
+            # Fallback logic
+            if not results:
+                print(f"  No results in {storefront}, trying fallbacks...")
+                fallbacks = ['fresh', 'wholefoods', 'amazon']
+                if storefront in fallbacks:
+                    fallbacks.remove(storefront)
+                
+                for fb_store in fallbacks:
+                    print(f"  Fallback: Searching in {fb_store}...")
+                    fb_results = s.search_item(query, storefront=fb_store)
+                    if fb_results:
+                        print(f"  ✓ Found {len(fb_results)} results in {fb_store}")
+                        results = fb_results
+                        break
+            
         if not results:
-            print(f"  WARNING: No results found for {query}")
+            print(f"  WARNING: No results found for {query} in any storefront")
             return jsonify({'error': f'No products found for "{query}"'}), 200
             
         # 4. Rank and format results
@@ -134,8 +198,10 @@ def search_ingredient_endpoint():
                 'title': opt['title'],
                 'price': opt['price'],
                 'asin': opt['asin'],
+                'url': opt.get('url', f"https://www.amazon.com/dp/{opt['asin']}"),
                 'confidence': opt.get('confidence', 0),
                 'image': opt.get('image', ''),
+                'department': opt.get('department', 'Amazon.com'),
                 'quantity_recommendation': 1,
                 'total_price': opt['price']
             }
