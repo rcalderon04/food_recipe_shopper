@@ -6,10 +6,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Recipe to Amazon Fresh</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Outfit:wght@500;600;700&display=swap"
+        rel="stylesheet">
 </head>
 
 <body>
+    <div class="toast-container" id="toast-container"></div>
+
     <div class="container">
         <header>
             <h1>Recipe to Amazon Fresh</h1>
@@ -55,6 +59,9 @@
         </div>
 
         <div id="floating-cart" class="hidden">
+            <div class="cart-info">
+                <span id="float-count">0</span> items <span id="float-total">($0.00)</span>
+            </div>
             <button onclick="addToCart()" id="add-to-cart-btn">
                 Add to Cart
             </button>
@@ -67,7 +74,9 @@
             <div class="ingredient-info">
                 <h3 class="ingredient-name"></h3>
                 <p class="ingredient-original"></p>
-                <div class="status-indicator loading">Waiting...</div>
+                <div class="status-indicator loading">
+                    <div class="skeleton-text"></div>
+                </div>
             </div>
             <div class="product-options hidden">
                 <!-- Product cards go here -->
@@ -111,9 +120,30 @@
         let ingredientsData = [];
         let selectedItems = new Map();
 
+        function showToast(message, type = 'info') {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            toast.className = `toast ${type}`;
+            toast.innerHTML = `
+                <div class="toast-content">
+                    <div class="toast-message">${message}</div>
+                </div>
+            `;
+
+            container.appendChild(toast);
+
+            // Remove after 3 seconds
+            setTimeout(() => {
+                toast.style.opacity = '0';
+                toast.style.transform = 'translateX(100%)';
+                toast.style.transition = 'all 0.3s ease-out';
+                setTimeout(() => toast.remove(), 300);
+            }, 4000);
+        }
+
         async function parseRecipe() {
             const url = document.getElementById('recipe-url').value;
-            if (!url) return alert('Please enter a URL');
+            if (!url) return showToast('Please enter a URL', 'error');
 
             // Reset UI
             document.getElementById('results-section').classList.add('hidden');
@@ -148,7 +178,7 @@
                 processIngredientsSequentially(data.ingredients);
 
             } catch (e) {
-                alert('Error: ' + e.message);
+                showToast('Error: ' + e.message, 'error');
                 document.getElementById('loading').classList.add('hidden');
             } finally {
                 document.getElementById('parse-btn').disabled = false;
@@ -382,13 +412,17 @@
 
             document.getElementById('selected-count').textContent = count;
             document.getElementById('total-cost').textContent = `($${total.toFixed(2)})`;
+
+            // Update floating cart
+            document.getElementById('float-count').textContent = count;
+            document.getElementById('float-total').textContent = `($${total.toFixed(2)})`;
         }
 
         async function addToCart() {
             const btn = document.getElementById('add-to-cart-btn');
             const originalText = btn.textContent;
             btn.disabled = true;
-            btn.textContent = 'Adding items to Amazon Cart...';
+            btn.textContent = 'Adding...';
 
             // Clear previous errors
             document.querySelectorAll('.item-error-message').forEach(el => {
@@ -405,6 +439,13 @@
                     title: item.title,
                     ingredient_index: item.ingredient_index
                 }));
+
+            if (items.length === 0) {
+                showToast('No items selected to add.', 'error');
+                btn.disabled = false;
+                btn.textContent = originalText;
+                return;
+            }
 
             try {
                 const response = await fetch('/api/cart', {
@@ -448,13 +489,13 @@
                 }
 
                 if (errorCount === 0) {
-                    alert(`Success! Added ${successCount} items to cart.`);
+                    showToast(`Success! Added ${successCount} items to cart.`, 'success');
                 } else {
-                    alert(`Added ${successCount} items. Failed to add ${errorCount} items. Check the red error messages.`);
+                    showToast(`Added ${successCount} items. Failed to add ${errorCount}.`, 'error');
                 }
 
             } catch (e) {
-                alert('Error adding to cart: ' + e.message);
+                showToast('Error adding to cart: ' + e.message, 'error');
             } finally {
                 btn.disabled = false;
                 btn.textContent = originalText;
