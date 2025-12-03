@@ -1,0 +1,115 @@
+Found 59 items. Inspecting for Fresh indicators...
+
+--- Item 1 ---
+Title: Niman Ranch, Uncured Sausage Sweet Italian, 12 oz
+Inner Text contains 'Fresh': False
+Inner Text contains 'Whole Foods': False
+Inner Text contains 'Amazon Grocery': False
+Full Inner Text: Niman Ranch, Uncured Sausage Sweet Italian, 12 oz
+Ranch Sweet
+4.4
+4.4 out of 5 stars
+ (1.2K)
+Price, product page
+$7.49
+$7
+.
+49 (
+$9.99
+$9.99/lb)
+SNAP EBT eligible
+ $9.95 delivery Today 9 PM - 11 PM
+Or...
+Image Alt: Niman Ranch, Uncured Sausage Sweet Italian, 12 oz
+Image Alt: Whole Foods Market
+Delivery Text: 4.4
+
+--- Item 2 ---
+Title: Johnsonville, Sweet Italian Sausage, 5 count, 19 oz
+Inner Text contains 'Fresh': False
+Inner Text contains 'Whole Foods': False
+Inner Text contains 'Amazon Grocery': False
+Full Inner Text: Johnsonville, Sweet Italian Sausage, 5 count, 19 oz
+Sweet19 ounce
+4.6
+4.6 out of 5 stars
+ (313)
+Price, product page
+$5.44
+$5
+.
+44 (
+$4.58
+$4.58/lb)
+SNAP EBT eligible
+ FREE pickup
+See options...
+Image Alt: Johnsonville, Sweet Italian Sausage, 5 count, 19 oz
+Image Alt: Amazon Fresh
+Delivery Text: 4.6
+
+--- Item 3 ---
+Title: Mild Italian Pork Sausage
+Inner Text contains 'Fresh': False
+Inner Text contains 'Whole Foods': False
+Inner Text contains 'Amazon Grocery': False
+Full Inner Text: Mild Italian Pork Sausage
+Pork
+4.4
+4.4 out of 5 stars
+ (1.9K)
+$6.99
+$6
+.
+99 /lb
+SNAP EBT eligible
+ $9.95 delivery Today 9 PM - 11 PM
+Or FREE pickup
+See options...
+Image Alt: Mild Italian Pork Sausage
+Image Alt: Whole Foods Market
+Delivery Text: 4.4
+
+--- Item 4 ---
+Title: Amazon Grocery, Mild Italian Sausage, 19 Oz, Frozen (Previously Fresh Brand, Packaging May Vary)
+Inner Text contains 'Fresh': True
+Inner Text contains 'Whole Foods': False
+Inner Text contains 'Amazon Grocery': True
+Full Inner Text: Amazon Grocery, Mild Italian Sausage, 19 Oz, Frozen (Previously Fresh Brand, Packaging May Vary)
+Sausage19 Ounce
+4.7
+4.7 out of 5 stars
+ (841)
+Price, product page
+$5.68
+$5
+.
+68 (
+$4.78
+$4.78/lb)
+SNAP ...
+Image Alt: Amazon Grocery, Mild Italian Sausage, 19 Oz, Frozen (Previously Fresh Brand, Packaging May Vary)
+Delivery Text: 4.7
+
+--- Item 5 ---
+Title: 365 By Whole Foods Market, Mild Italian Pork Sausage, 16 Ounce
+Inner Text contains 'Fresh': False
+Inner Text contains 'Whole Foods': True
+Inner Text contains 'Amazon Grocery': False
+Full Inner Text: 365 By Whole Foods Market, Mild Italian Pork Sausage, 16 Ounce
+Mild
+4.6
+4.6 out of 5 stars
+ (298)
+Price, product page
+$5.99
+$5
+.
+99 (
+$5.99
+$5.99/lb)
+SNAP EBT eligible
+ $9.95 delivery Today 9 PM - 11 ...
+Image Alt: 365 By Whole Foods Market, Mild Italian Pork Sausage, 16 Ounce
+Image Alt: Whole Foods Market
+Delivery Text: 4.6

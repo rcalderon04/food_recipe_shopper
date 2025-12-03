@@ -262,6 +262,12 @@ def add_to_cart_endpoint():
     if not items:
         return jsonify({'error': 'No items provided'}), 400
     
+    # Filter out items with 0 quantity
+    items = [item for item in items if item.get('quantity', 0) > 0]
+    
+    if not items:
+        return jsonify({'error': 'No valid items (quantity > 0) to add'}), 400
+    
     results = []
     
     # Process sequentially to avoid bot detection

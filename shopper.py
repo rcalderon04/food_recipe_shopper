@@ -507,13 +507,68 @@ class AmazonShopper:
                     # Extract department/storefront info
                     department = "Amazon.com" # Default
                     try:
-                        # Check for Fresh/Whole Foods text in the item
-                        # We look for specific indicators usually found in delivery/sold by text
+                        # 1. Gather all signals
                         item_text = item.inner_text().lower()
-                        if "amazon fresh" in item_text:
+                        
+                        image_alts = []
+                        try:
+                            imgs = item.query_selector_all('img')
+                            for img in imgs:
+                                alt = img.get_attribute('alt')
+                                if alt:
+                                    image_alts.append(alt.lower())
+                        except:
+                            pass
+                        combined_alts = " ".join(image_alts)
+                        
+                        delivery_info = ""
+                        try:
+                            delivery_el = item.query_selector('.a-size-small .a-color-base') or item.query_selector('.a-row .a-size-small')
+                            if delivery_el:
+                                delivery_info = delivery_el.inner_text().lower()
+                        except:
+                            pass
+                        
+                        # 2. Check for STRONG Fresh indicators first (overrides everything)
+                        is_fresh = False
+                        if "sold by amazonfresh" in item_text or "sold by amazonfresh" in delivery_info:
+                            is_fresh = True
+                        elif "amazon fresh" in combined_alts:
+                            is_fresh = True
+                        elif "freshness guarantee" in item_text:
+                            is_fresh = True
+                        elif "amazon grocery" in item_text or "amazon grocery" in combined_alts:
+                            is_fresh = True
+                            
+                        # 3. Check for STRONG Whole Foods indicators
+                        is_wf = False
+                        if "whole foods market" in combined_alts: # The WFM logo usually has this alt
+                            is_wf = True
+                        elif "sold by whole foods" in item_text or "sold by whole foods" in delivery_info:
+                            is_wf = True
+                            
+                        # 4. Assign Department
+                        if is_fresh:
                             department = "Amazon Fresh"
-                        elif "whole foods" in item_text:
+                        elif is_wf:
                             department = "Whole Foods"
+                        else:
+                            # Fallback logic (weaker signals)
+                            # Be careful: "365 by Whole Foods" might be in text, but sold by Fresh.
+                            # So only use text match if we didn't find strong Fresh indicators.
+                            if "whole foods" in item_text and not is_fresh:
+                                 # If we are in Fresh storefront, and it's 365 brand, it's likely Fresh 
+                                 # unless explicitly marked otherwise (which we checked above).
+                                 if storefront == 'fresh':
+                                     department = "Amazon Fresh"
+                                 else:
+                                     department = "Whole Foods"
+                            elif "amazon fresh" in item_text:
+                                department = "Amazon Fresh"
+                            elif storefront == 'fresh':
+                                department = "Amazon Fresh"
+                            elif storefront == 'wholefoods':
+                                department = "Whole Foods"
                     except:
                         pass
 
@@ -595,50 +650,69 @@ class AmazonShopper:
                 return False
             
             # Wait for Add to Cart button with multiple strategies
+            # IMPORTANT: Scope to the buy box to avoid clicking "Sponsored" or "Frequently bought together" buttons
             button = self._find_add_to_cart_button()
             
             if button:
-                # Click the button 'quantity' times
-                # Note: This is a simple approach. Some pages might require waiting for the cart to update.
-                # Amazon Fresh often changes the button to "1 in cart" after the first click.
-                # However, clicking the "+" button is harder to locate reliably.
-                # Often, clicking the main "Add to Cart" button again (if it reverts or stays) works,
-                # or finding the specific incrementer.
-                
-                # For now, we'll try to click the initial button once.
-                # If quantity > 1, we'll try to find the increment button or just click again if possible.
-                
+                # Strategy 1: Try to set quantity via dropdown first (Standard Amazon)
+                try:
+                    qty_select = self.page.query_selector('#quantity') or self.page.query_selector('select[name="quantity"]')
+                    if qty_select and qty_select.is_visible():
+                        # Check if the desired quantity is available
+                        options = qty_select.query_selector_all('option')
+                        max_qty = len(options)
+                        target_qty = min(quantity, max_qty)
+                        
+                        qty_select.select_option(str(target_qty))
+                        print(f"  Set quantity dropdown to {target_qty}")
+                        
+                        # Click Add to Cart once
+                        button.click()
+                        print("✓ Clicked 'Add to Cart'.")
+                        time.sleep(2)
+                        return True
+                except Exception as e:
+                    print(f"  Could not set quantity dropdown: {e}")
+
+                # Strategy 2: Click "Add to Cart" multiple times (Fresh / No Dropdown)
+                # Click the first time
                 button.click()
-                print("✓ Clicked 'Add to Cart'.")
+                print("✓ Clicked 'Add to Cart' (1st time).")
                 time.sleep(2) # Wait for action
                 
                 if quantity > 1:
-                    # Try to find the plus button to increment
-                    # Selectors for the plus button in the cart widget or on page
-                    plus_selectors = [
-                        'button[name="submit.addToCart"]', # Sometimes it stays as add to cart
-                        '#freshAddToCartButton',
-                        '.a-button-input[value="+"]',
-                        'button[aria-label="Increase quantity"]',
-                        'button[data-action="increment-item-quantity"]'
-                    ]
+                    print(f"  Adding {quantity - 1} more items...")
+                    # For Fresh, the button often stays or we need to find the incrementer
+                    # But clicking the main button again is often the most reliable fallback if it exists
                     
-                    for _ in range(quantity - 1):
-                        clicked_plus = False
-                        for selector in plus_selectors:
-                            try:
-                                plus_btn = self.page.query_selector(selector)
-                                if plus_btn and plus_btn.is_visible():
-                                    plus_btn.click()
-                                    clicked_plus = True
-                                    print("  + Incremented quantity")
-                                    time.sleep(1)
-                                    break
-                            except:
-                                continue
-                        
-                        if not clicked_plus:
-                            print(f"  ⚠ Could not find button to increment quantity to {quantity}. Added 1.")
+                    for i in range(quantity - 1):
+                        try:
+                            # Re-find the button as the DOM might have updated
+                            # Try to find the specific "Fresh" add button or the main button again
+                            # We prioritize the "Fresh" widget button if it appears
+                            fresh_btn = self.page.query_selector('#freshAddToCartButton')
+                            if fresh_btn and fresh_btn.is_visible():
+                                fresh_btn.click()
+                                print(f"  + Clicked Fresh Add button ({i+2}/{quantity})")
+                            else:
+                                # Try the original button selector again
+                                btn = self._find_add_to_cart_button()
+                                if btn and btn.is_visible():
+                                    btn.click()
+                                    print(f"  + Clicked Add to Cart button ({i+2}/{quantity})")
+                                else:
+                                    # Try to find the plus button
+                                    plus_btn = self.page.query_selector('.a-button-input[value="+"]') or \
+                                               self.page.query_selector('button[aria-label="Increase quantity"]')
+                                    if plus_btn and plus_btn.is_visible():
+                                        plus_btn.click()
+                                        print(f"  + Clicked Plus button ({i+2}/{quantity})")
+                                    else:
+                                        print(f"  ⚠ Could not find button to add item {i+2}")
+                                        break
+                            time.sleep(1.5) # Delay between clicks
+                        except Exception as e:
+                            print(f"  Error adding item {i+2}: {e}")
                             break
                 
                 return True
@@ -674,45 +748,60 @@ class AmazonShopper:
             return False
     
     def _find_add_to_cart_button(self):
-        """Finds the Add to Cart button using multiple strategies."""
-        # Strategy 1: Common ID/name selectors
-        add_button_selectors = [
-            'input[name="submit.addToCart"]',
-            '#add-to-cart-button',
-            '#freshAddToCartButton',
-            'input[id="add-to-cart-button"]',
-            'button[id="add-to-cart-button"]',
-            '#buy-now-button',  # Sometimes this is present instead
-        ]
-        
-        for selector in add_button_selectors:
-            try:
-                button = self.page.wait_for_selector(selector, timeout=2000)
-                if button and button.is_visible():
-                    return button
-            except:
-                continue
-        
-        # Strategy 2: Find by text content
+        """Finds the 'Add to Cart' button using multiple strategies, scoped to the Buy Box."""
         try:
-            buttons = self.page.query_selector_all('button, input[type="submit"]')
-            for button in buttons:
+            # 1. Define Buy Box Containers (to avoid clicking sponsored items)
+            buy_box_selectors = [
+                '#buybox', 
+                '#rightCol', 
+                '#apex_desktop',
+                '#exports_desktop_qualifiedBuybox_buyNow_feature',
+                '#freshAddToCartButton', # Self-contained
+                '.a-box-group' # Generic box group often containing buy box
+            ]
+            
+            # 2. Define Button Selectors
+            button_selectors = [
+                '#add-to-cart-button',
+                '#freshAddToCartButton input',
+                'input[name="submit.addToCart"]',
+                '#buybox-see-all-buying-choices .a-button-input',
+                'button[name="submit.addToCart"]',
+                '.a-button-input[value="Add to Cart"]',
+                'input[title="Add to Shopping Cart"]'
+            ]
+            
+            # Strategy: Look for button INSIDE buy box containers first
+            for container_sel in buy_box_selectors:
                 try:
-                    text = button.inner_text().lower()
-                    value = button.get_attribute('value')
-                    if value:
-                        value = value.lower()
-                    
-                    if ('add to cart' in text or 
-                        (value and 'add to cart' in value)):
-                        if button.is_visible():
-                            return button
+                    container = self.page.query_selector(container_sel)
+                    if container:
+                        for btn_sel in button_selectors:
+                            btn = container.query_selector(btn_sel)
+                            if btn and btn.is_visible():
+                                return btn
                 except:
                     continue
+            
+            # Fallback: Look for specific IDs globally if not found in containers
+            # (Only use very specific IDs here to avoid sponsored buttons)
+            fallback_selectors = [
+                '#add-to-cart-button',
+                '#freshAddToCartButton',
+                '#freshAddToCartButton input'
+            ]
+            
+            for selector in fallback_selectors:
+                try:
+                    button = self.page.query_selector(selector)
+                    if button and button.is_visible():
+                        return button
+                except:
+                    continue
+                    
+            return None
         except:
-            pass
-        
-        return None
+            return None
     
     def _save_cookies(self):
         """Saves the current browser cookies to file."""

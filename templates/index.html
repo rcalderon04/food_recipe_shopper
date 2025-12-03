@@ -325,11 +325,11 @@
                             }
                             // Handle N/A price
                             if (isNaN(unitPrice)) {
-                                priceEl.textContent = opt.price; // Use pre-selected element
+                                priceEl.textContent = opt.price;
                                 itemData.total_price = 0;
                             } else {
                                 const total = (unitPrice * newQty).toFixed(2);
-                                priceEl.textContent = `$${unitPrice} ea (Total: $${total})`; // Use pre-selected element
+                                priceEl.textContent = `$${unitPrice} ea (Total: $${total})`;
                                 itemData.total_price = parseFloat(total);
                             }
                         }
@@ -396,13 +396,15 @@
                 el.textContent = '';
             });
 
-            const items = Array.from(selectedItems.values()).map(item => ({
-                asin: item.asin,
-                url: item.url,
-                quantity: item.quantity,
-                title: item.title,
-                ingredient_index: item.ingredient_index
-            }));
+            const items = Array.from(selectedItems.values())
+                .filter(item => item.quantity > 0)
+                .map(item => ({
+                    asin: item.asin,
+                    url: item.url,
+                    quantity: item.quantity,
+                    title: item.title,
+                    ingredient_index: item.ingredient_index
+                }));
 
             try {
                 const response = await fetch('/api/cart', {
@@ -410,6 +412,10 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ items })
                 });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
 
                 const data = await response.json();
 
