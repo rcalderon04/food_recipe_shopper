@@ -1,0 +1,35 @@
+{
+    "manifest_version": 3,
+    "name": "Recipe to Amazon Fresh",
+    "version": "1.0",
+    "description": "Turn any recipe into an Amazon Fresh shopping list.",
+    "permissions": [
+        "activeTab",
+        "scripting",
+        "storage",
+        "sidePanel"
+    ],
+    "host_permissions": [
+        "*://*.amazon.com/*",
+        "*://*/*"
+    ],
+    "action": {
+        "default_title": "Open Recipe Shopper"
+    },
+    "side_panel": {
+        "default_path": "popup.html"
+    },
+    "background": {
+        "service_worker": "background.js"
+    },
+    "content_scripts": [
+        {
+            "matches": [
+                "*://*.amazon.com/*"
+            ],
+            "js": [
+                "content.js"
+            ]
+        }
+    ]
+}

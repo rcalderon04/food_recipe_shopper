@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Recipe to Amazon Fresh</title>
+    <link rel="stylesheet" href="popup.css">
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Outfit:wght@500;600;700&display=swap"
+        rel="stylesheet">
+</head>
+
+<body>
+    <div class="toast-container" id="toast-container"></div>
+
+    <div class="container">
+        <header>
+            <h1>Recipe to Amazon Fresh</h1>
+            <p>Turn any recipe into a shopping list.</p>
+        </header>
+
+        <section class="input-section">
+            <div class="controls-row">
+                <select id="storefront-select" title="Select Storefront">
+                    <option value="fresh">Amazon Fresh</option>
+                    <option value="wholefoods">Whole Foods</option>
+                    <option value="amazon">Amazon.com</option>
+                </select>
+                <div class="headless-toggle">
+                    <input type="checkbox" id="headless-mode">
+                    <label for="headless-mode">Headless</label>
+                </div>
+            </div>
+            <div class="url-row">
+                <input type="text" id="recipe-url" placeholder="Paste recipe URL here..."
+                    value="https://www.allrecipes.com/recipe/23600/worlds-best-lasagna/">
+                <button id="parse-btn">Get Ingredients</button>
+            </div>
+        </section>
+
+        <div id="loading" class="hidden">
+            <div class="spinner"></div>
+            <p id="loading-text">Parsing recipe...</p>
+        </div>
+
+        <div id="results-section" class="hidden">
+            <div class="results-header">
+                <h2>Ingredients & Products</h2>
+                <div class="cart-summary">
+                    <span id="selected-count">0</span> items selected
+                    <span id="total-cost">($0.00)</span>
+                </div>
+            </div>
+
+            <div id="ingredients-list">
+                <!-- Ingredients will be populated here -->
+            </div>
+        </div>
+
+        <div id="floating-cart" class="hidden">
+            <div class="cart-info">
+                <span id="float-count">0</span> items <span id="float-total">($0.00)</span>
+            </div>
+            <button id="add-to-cart-btn">
+                Add to Cart
+            </button>
+        </div>
+    </div>
+
+    <!-- Template for an ingredient row -->
+    <template id="ingredient-template">
+        <div class="ingredient-row">
+            <div class="ingredient-info">
+                <h3 class="ingredient-name"></h3>
+                <p class="ingredient-original"></p>
+                <div class="status-indicator loading">
+                    <div class="skeleton-text"></div>
+                </div>
+            </div>
+            <div class="product-options hidden">
+                <!-- Product cards go here -->
+            </div>
+        </div>
+    </template>
+
+    <!-- Template for a product card -->
+    <template id="product-card-template">
+        <label class="product-card">
+            <input type="radio" name="group-name" class="product-select">
+            <div class="card-content">
+                <div class="product-img-container">
+                    <img src="" alt="Product" class="product-img">
+                </div>
+                <div class="product-details">
+                    <div class="badges-row">
+                        <div class="confidence-badge"></div>
+                        <div class="department-badge hidden"></div>
+                    </div>
+                    <h4 class="product-title"></h4>
+                    <a href="#" class="product-link" target="_blank" rel="noopener noreferrer"
+                        style="font-size: 0.75rem; color: #007185; text-decoration: none; margin-bottom: 0.25rem; display: inline-block;">View
+                        on Amazon →</a>
+                    <div class="price-row">
+                        <span class="price"></span>
+                        <span class="quantity-badge hidden"></span>
+                    </div>
+                    <div class="quantity-controls">
+                        <button type="button" class="qty-btn minus">-</button>
+                        <input type="number" class="qty-input" value="1" min="0" max="10">
+                        <button type="button" class="qty-btn plus">+</button>
+                    </div>
+                    <div class="item-error-message hidden"></div>
+                </div>
+            </div>
+        </label>
+    </template>
+
+    <script src="popup.js"></script>
+</body>
+
+</html>

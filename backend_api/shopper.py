@@ -48,66 +48,61 @@ class AmazonShopper:
         # We don't need to manually load cookies anymore as the profile handles it,
         # but we'll keep the file attribute for backward compatibility if needed.
         
-    def check_is_logged_in(self):
-        """
-        Checks if the user is currently logged in.
-        Returns:
-            bool: True if logged in, False otherwise.
-        """
-        print("Checking login status...")
+    def login(self, force_relogin=False):
+        """Navigates to Amazon and waits for user login."""
+        print("Navigating to Amazon Fresh...")
+        # Direct link to Amazon Fresh or just Amazon
+        self.page.goto("https://www.amazon.com/alm/storefront?almBrandId=QW1hem9uIEZyZXNo", timeout=30000)
+        
+        # Wait for page to load
+        time.sleep(3)
+        
+        # Check if already logged in by looking for account element
         try:
-            # Navigate to Amazon home if not already there
-            if "amazon.com" not in self.page.url:
-                self.page.goto("https://www.amazon.com/", timeout=15000)
-                time.sleep(2)
-            
-            # Check for account element
+            # Wait briefly to see if we're already logged in
             account_element = self.page.wait_for_selector('#nav-link-accountList', timeout=5000)
-            if account_element:
-                account_text = account_element.inner_text()
-                if account_text and 'Hello' in account_text and 'Hello, sign in' not in account_text:
-                    print(f"✓ Already logged in as: {account_text.split('Account')[0].strip()}")
-                    return True
+            if account_element and not force_relogin:
+                # Double-check by looking for the account name/email
+                try:
+                    account_text = account_element.inner_text()
+                    if account_text and 'Hello' in account_text:
+                        print(f"Already logged in (session restored from cookies): {account_text}")
+                        return True
+                except:
+                    pass
         except:
             pass
             
-        return False
-
-    def wait_for_login(self):
-        """
-        Waits for the user to log in via the browser.
-        Blocks execution until login is detected or timeout.
-        """
+        # Check for error page
+        if self._check_for_error_page():
+             print("Warning: Amazon error page detected during login check.")
+        
+        # Not logged in or session expired
         print("\n" + "="*60)
-        print("⚠️  LOGIN REQUIRED")
-        print("Please log in to your Amazon account in the opened browser window.")
-        print("Waiting for login...")
+        print("⚠️  NOT LOGGED IN TO AMAZON")
+        print("Please log in to your Amazon account in the browser window.")
+        print("The session will be saved for future use.")
         print("="*60 + "\n")
         
-        # Navigate to login page
-        try:
-            self.page.goto("https://www.amazon.com/ap/signin?openid.pope.co=1&openid.return_to=https%3A%2F%2Fwww.amazon.com%2F%3Fref_%3Dnav_ya_signin&openid.identity=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0%2Fidentifier_select&openid.assoc_handle=usflex&openid.mode=checkid_setup&openid.claimed_id=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0%2Fidentifier_select&openid.ns=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0&", timeout=30000)
-        except:
-            print("Could not navigate to login page, user might be already navigating.")
-
-        max_wait = 300  # 5 minutes
-        check_interval = 2
+        # Wait for login - check periodically if user has logged in
+        max_wait = 60  # 60 seconds
+        check_interval = 2  # Check every 2 seconds
         
-        start_time = time.time()
-        while time.time() - start_time < max_wait:
-            if self.check_is_logged_in():
-                print("\n✓ Login successful! Resuming...")
-                return True
+        for i in range(0, max_wait, check_interval):
             time.sleep(check_interval)
-            
-        print("❌ Login timeout.")
+            try:
+                account_element = self.page.wait_for_selector('#nav-link-accountList', timeout=1000)
+                if account_element:
+                    account_text = account_element.inner_text()
+                    if account_text and 'Hello' in account_text:
+                        print(f"✓ Login detected: {account_text}")
+                        time.sleep(2)  # Give it a moment to fully load
+                        return True
+            except:
+                continue
+        
+        print("⚠️  Login timeout - please ensure you're logged in before using the tool.")
         return False
-
-    def login(self, force_relogin=False):
-        """Legacy login method - redirects to check_is_logged_in"""
-        if self.check_is_logged_in() and not force_relogin:
-            return True
-        return self.wait_for_login()
 
     def search_item(self, query, storefront='fresh'):
         """
@@ -560,16 +555,20 @@ class AmazonShopper:
                         else:
                             # Fallback logic (weaker signals)
                             # Be careful: "365 by Whole Foods" might be in text, but sold by Fresh.
-                            
-                            # If we are explicitly searching in Fresh/Whole Foods, trust that unless contra-indicated
-                            if storefront == 'fresh':
+                            # So only use text match if we didn't find strong Fresh indicators.
+                            if "whole foods" in item_text and not is_fresh:
+                                 # If we are in Fresh storefront, and it's 365 brand, it's likely Fresh 
+                                 # unless explicitly marked otherwise (which we checked above).
+                                 if storefront == 'fresh':
+                                     department = "Amazon Fresh"
+                                 else:
+                                     department = "Whole Foods"
+                            elif "amazon fresh" in item_text:
+                                department = "Amazon Fresh"
+                            elif storefront == 'fresh':
                                 department = "Amazon Fresh"
                             elif storefront == 'wholefoods':
                                 department = "Whole Foods"
-                            elif "whole foods" in item_text and not is_fresh:
-                                department = "Whole Foods"
-                            elif "amazon fresh" in item_text:
-                                department = "Amazon Fresh"
                     except:
                         pass
 
@@ -816,21 +815,10 @@ class AmazonShopper:
 
     def close(self):
         """Closes the browser."""
-        try:
-            if self.context:
-                self.context.close()
-        except:
-            pass
-            
-        try:
-            if self.playwright:
-                self.playwright.stop()
-        except:
-            pass
-            
-    def stop(self):
-        """Alias for close."""
-        self.close()
+        if self.context:
+            self.context.close()
+        if self.playwright:
+            self.playwright.stop()
 
 if __name__ == "__main__":
     # Test the shopper
