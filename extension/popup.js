@@ -105,56 +105,101 @@ function createIngredientRow(ingredientText, index) {
 }
 
 async function processIngredientsSequentially(ingredients) {
-    for (let i = 0; i < ingredients.length; i++) {
-        const ing = ingredients[i];
-        const row = document.getElementById(`ing-row-${i}`);
-        if (row) row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    // Switch to batch processing
+    await processIngredientsBatch(ingredients);
+}
 
-        await searchIngredient(ing, i);
+async function processIngredientsBatch(ingredients) {
+    const BATCH_SIZE = 4; // Process 4 items at a time
+    const storefront = document.getElementById('storefront-select').value;
+    const headless = document.getElementById('headless-mode').checked;
 
-        // Add small delay between searches
+    for (let i = 0; i < ingredients.length; i += BATCH_SIZE) {
+        const batch = ingredients.slice(i, i + BATCH_SIZE);
+
+        // Scroll first item into view
+        const firstRow = document.getElementById(`ing-row-${i}`);
+        if (firstRow) firstRow.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+        // Update status for batch
+        batch.forEach((ing, offset) => {
+            const index = i + offset;
+            const row = document.getElementById(`ing-row-${index}`);
+            if (row) {
+                const statusIndicator = row.querySelector('.status-indicator');
+                statusIndicator.textContent = 'Searching items...';
+                statusIndicator.classList.remove('hidden', 'error');
+                statusIndicator.classList.add('loading');
+            }
+        });
+
+        const queries = batch.map((ing, offset) => ({
+            ingredient: ing,
+            id: i + offset,
+            storefront: storefront
+        }));
+
+        try {
+            const response = await fetch('http://127.0.0.1:5000/api/search-batch', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    queries: queries,
+                    headless: headless
+                })
+            });
+
+            const data = await response.json();
+
+            if (data.results) {
+                data.results.forEach((res, resIndex) => {
+                    // Start index + offset in batch
+                    const originalIndex = i + resIndex;
+                    updateRowWithResult(res, originalIndex, ingredients[originalIndex]);
+                });
+            }
+
+        } catch (e) {
+            console.error("Batch error:", e);
+            batch.forEach((ing, offset) => {
+                const index = i + offset;
+                const row = document.getElementById(`ing-row-${index}`);
+                if (row) {
+                    const statusIndicator = row.querySelector('.status-indicator');
+                    statusIndicator.textContent = 'Error';
+                    statusIndicator.classList.add('error');
+                }
+            });
+        }
+
+        // Small delay between batches to be nice to API
         await new Promise(r => setTimeout(r, 1000));
     }
 }
 
-async function searchIngredient(ingredientText, index) {
+function updateRowWithResult(data, index, originalIngredient) {
     const row = document.getElementById(`ing-row-${index}`);
+    if (!row) return;
+
     const statusIndicator = row.querySelector('.status-indicator');
-    const storefront = document.getElementById('storefront-select').value;
-    const headless = document.getElementById('headless-mode').checked;
 
-    try {
-        statusIndicator.textContent = 'Searching Amazon...';
-        statusIndicator.classList.remove('error', 'hidden');
-        statusIndicator.classList.add('loading');
-
-        const data = await searchAmazon(ingredientText, storefront, headless);
-
-        if (data.error) throw new Error(data.error);
-
-        if (!data.options || data.options.length === 0) {
-            statusIndicator.textContent = 'No products found';
-            statusIndicator.classList.remove('loading');
-            statusIndicator.classList.add('error');
-            return;
-        }
-
-        row.querySelector('.ingredient-name').textContent = ingredientText;
-        statusIndicator.classList.add('hidden');
-
-        const optionsContainer = row.querySelector('.product-options');
-        optionsContainer.classList.remove('hidden');
-
-        data.options.forEach((opt, optIndex) => {
-            renderProductCard(opt, optIndex, index, optionsContainer);
-        });
-
-    } catch (e) {
-        console.error(`Error searching for "${ingredientText}":`, e);
-        statusIndicator.textContent = `Error: ${e.message}`;
-        statusIndicator.classList.remove('loading', 'hidden');
+    if (!data.options || data.options.length === 0) {
+        statusIndicator.textContent = 'No products found';
+        statusIndicator.classList.remove('loading');
         statusIndicator.classList.add('error');
+        return;
     }
+
+    row.querySelector('.ingredient-name').textContent = originalIngredient;
+    statusIndicator.classList.add('hidden');
+
+    const optionsContainer = row.querySelector('.product-options');
+    optionsContainer.innerHTML = ''; // Clear previous
+    optionsContainer.classList.remove('hidden');
+
+    data.options.forEach((opt, optIndex) => {
+        renderProductCard(opt, optIndex, index, optionsContainer);
+    });
 }
 
 async function searchAmazon(query, storefront, headless) {

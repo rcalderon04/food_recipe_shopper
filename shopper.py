@@ -48,66 +48,61 @@ class AmazonShopper:
         # We don't need to manually load cookies anymore as the profile handles it,
         # but we'll keep the file attribute for backward compatibility if needed.
         
-    def check_is_logged_in(self):
-        """
-        Checks if the user is currently logged in.
-        Returns:
-            bool: True if logged in, False otherwise.
-        """
-        print("Checking login status...")
+    def login(self, force_relogin=False):
+        """Navigates to Amazon and waits for user login."""
+        print("Navigating to Amazon Fresh...")
+        # Direct link to Amazon Fresh or just Amazon
+        self.page.goto("https://www.amazon.com/alm/storefront?almBrandId=QW1hem9uIEZyZXNo", timeout=30000)
+        
+        # Wait for page to load
+        time.sleep(3)
+        
+        # Check if already logged in by looking for account element
         try:
-            # Navigate to Amazon home if not already there
-            if "amazon.com" not in self.page.url:
-                self.page.goto("https://www.amazon.com/", timeout=15000)
-                time.sleep(2)
-            
-            # Check for account element
+            # Wait briefly to see if we're already logged in
             account_element = self.page.wait_for_selector('#nav-link-accountList', timeout=5000)
-            if account_element:
-                account_text = account_element.inner_text()
-                if account_text and 'Hello' in account_text and 'Hello, sign in' not in account_text:
-                    print(f"✓ Already logged in as: {account_text.split('Account')[0].strip()}")
-                    return True
+            if account_element and not force_relogin:
+                # Double-check by looking for the account name/email
+                try:
+                    account_text = account_element.inner_text()
+                    if account_text and 'Hello' in account_text:
+                        print(f"Already logged in (session restored from cookies): {account_text}")
+                        return True
+                except:
+                    pass
         except:
             pass
             
-        return False
-
-    def wait_for_login(self):
-        """
-        Waits for the user to log in via the browser.
-        Blocks execution until login is detected or timeout.
-        """
+        # Check for error page
+        if self._check_for_error_page():
+             print("Warning: Amazon error page detected during login check.")
+        
+        # Not logged in or session expired
         print("\n" + "="*60)
-        print("⚠️  LOGIN REQUIRED")
-        print("Please log in to your Amazon account in the opened browser window.")
-        print("Waiting for login...")
+        print("⚠️  NOT LOGGED IN TO AMAZON")
+        print("Please log in to your Amazon account in the browser window.")
+        print("The session will be saved for future use.")
         print("="*60 + "\n")
         
-        # Navigate to login page
-        try:
-            self.page.goto("https://www.amazon.com/ap/signin?openid.pope.co=1&openid.return_to=https%3A%2F%2Fwww.amazon.com%2F%3Fref_%3Dnav_ya_signin&openid.identity=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0%2Fidentifier_select&openid.assoc_handle=usflex&openid.mode=checkid_setup&openid.claimed_id=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0%2Fidentifier_select&openid.ns=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0&", timeout=30000)
-        except:
-            print("Could not navigate to login page, user might be already navigating.")
-
-        max_wait = 300  # 5 minutes
-        check_interval = 2
+        # Wait for login - check periodically if user has logged in
+        max_wait = 60  # 60 seconds
+        check_interval = 2  # Check every 2 seconds
         
-        start_time = time.time()
-        while time.time() - start_time < max_wait:
-            if self.check_is_logged_in():
-                print("\n✓ Login successful! Resuming...")
-                return True
+        for i in range(0, max_wait, check_interval):
             time.sleep(check_interval)
-            
-        print("❌ Login timeout.")
+            try:
+                account_element = self.page.wait_for_selector('#nav-link-accountList', timeout=1000)
+                if account_element:
+                    account_text = account_element.inner_text()
+                    if account_text and 'Hello' in account_text:
+                        print(f"✓ Login detected: {account_text}")
+                        time.sleep(2)  # Give it a moment to fully load
+                        return True
+            except:
+                continue
+        
+        print("⚠️  Login timeout - please ensure you're logged in before using the tool.")
         return False
-
-    def login(self, force_relogin=False):
-        """Legacy login method - redirects to check_is_logged_in"""
-        if self.check_is_logged_in() and not force_relogin:
-            return True
-        return self.wait_for_login()
 
     def search_item(self, query, storefront='fresh'):
         """
@@ -560,16 +555,20 @@ class AmazonShopper:
                         else:
                             # Fallback logic (weaker signals)
                             # Be careful: "365 by Whole Foods" might be in text, but sold by Fresh.
-                            
-                            # If we are explicitly searching in Fresh/Whole Foods, trust that unless contra-indicated
-                            if storefront == 'fresh':
+                            # So only use text match if we didn't find strong Fresh indicators.
+                            if "whole foods" in item_text and not is_fresh:
+                                 # If we are in Fresh storefront, and it's 365 brand, it's likely Fresh 
+                                 # unless explicitly marked otherwise (which we checked above).
+                                 if storefront == 'fresh':
+                                     department = "Amazon Fresh"
+                                 else:
+                                     department = "Whole Foods"
+                            elif "amazon fresh" in item_text:
+                                department = "Amazon Fresh"
+                            elif storefront == 'fresh':
                                 department = "Amazon Fresh"
                             elif storefront == 'wholefoods':
                                 department = "Whole Foods"
-                            elif "whole foods" in item_text and not is_fresh:
-                                department = "Whole Foods"
-                            elif "amazon fresh" in item_text:
-                                department = "Amazon Fresh"
                     except:
                         pass
 
@@ -803,6 +802,147 @@ class AmazonShopper:
             return None
         except:
             return None
+
+    def stop(self):
+        """Alias for close."""
+        self.close()
+
+from playwright.async_api import async_playwright
+import asyncio
+
+class AsyncAmazonShopper:
+    def __init__(self, headless=False, cookies_file='amazon_cookies.json'):
+        self.headless = headless
+        self.cookies_file = cookies_file
+        self.playwright = None
+        self.browser = None
+        self.context = None
+        
+    async def start(self):
+        """Starts the browser session with a persistent context."""
+        self.playwright = await async_playwright().start()
+        
+        # Use simple persistent context
+        user_data_dir = os.path.join(os.getcwd(), 'chrome_user_data')
+            
+        self.context = await self.playwright.chromium.launch_persistent_context(
+            user_data_dir,
+            headless=self.headless,
+            user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            viewport={'width': 1280, 'height': 720},
+            args=[
+                '--disable-blink-features=AutomationControlled',
+                '--no-sandbox',
+                '--disable-infobars',
+            ]
+        )
+        
+    async def stop(self):
+        try:
+            if self.context:
+                await self.context.close()
+        except:
+            pass
+        try:
+            if self.playwright:
+                await self.playwright.stop()
+        except:
+            pass
+            
+    async def search_single_item(self, item_data):
+        """Searches for a single item in a new page."""
+        query = item_data.get('query') or item_data.get('ingredient')
+        storefront = item_data.get('storefront', 'fresh')
+        
+        page = await self.context.new_page()
+        results = []
+        
+        try:
+            # Re-use logic adjusted for async
+            # Simplified search for batch efficiency
+            store_urls = {
+                'fresh': "https://www.amazon.com/alm/storefront?almBrandId=QW1hem9uIEZyZXNo",
+                'wholefoods': "https://www.amazon.com/alm/storefront?almBrandId=V2hvbGUgRm9vZHM=",
+                'amazon': "https://www.amazon.com/"
+            }
+            target_url = store_urls.get(storefront, store_urls['fresh'])
+            
+            await page.goto(target_url, timeout=30000)
+            
+            # Search
+            try:
+                search_box = await page.wait_for_selector('input[id="twotabsearchtextbox"]', timeout=15000)
+                if search_box:
+                     await search_box.fill(query)
+                     await search_box.press('Enter')
+                     await page.wait_for_load_state('domcontentloaded')
+            except:
+                return {'query': query, 'options': []}
+                
+            # Extract
+            await asyncio.sleep(1) # Wait for dynamic load
+            
+            # Robust extraction strategy
+            items = []
+            
+            # Try multiple selectors
+            result_selectors = [
+                'div.s-result-item[data-asin]',
+                'div[data-component-type="s-search-result"]',
+                'div.s-search-result',
+                '[data-asin]:not([data-asin=""])'
+            ]
+            
+            for selector in result_selectors:
+                try:
+                    items = await page.query_selector_all(selector)
+                    if items: break
+                except: continue
+            
+            if not items:
+                print(f"DEBUG: No items found for '{query}' using selectors")
+                return {'query': query, 'options': []}
+                
+            for item in items[:4]:
+                asin = await item.get_attribute('data-asin')
+                if not asin: continue
+                
+                title_el = await item.query_selector('h2 span')
+                title = await title_el.inner_text() if title_el else "Unknown"
+                
+                price_el = await item.query_selector('.a-price .a-offscreen')
+                price = await price_el.inner_text() if price_el else "N/A"
+                price = price.replace('$', '').strip()
+                
+                # Image
+                img_el = await item.query_selector('img.s-image')
+                image_url = await img_el.get_attribute('src') if img_el else ""
+                
+                # Department logic (Simplified)
+                department = "Amazon"
+                if storefront == 'fresh': department = "Amazon Fresh"
+                elif storefront == 'wholefoods': department = "Whole Foods"
+                
+                results.append({
+                    'title': title,
+                    'price': price,
+                    'asin': asin,
+                    'image': image_url,
+                    'department': department,
+                    'url': f"https://www.amazon.com/dp/{asin}"
+                })
+                
+        except Exception as e:
+            print(f"Error searching {query}: {e}")
+        finally:
+            await page.close()
+            
+        return {'query': query, 'options': results}
+
+    async def search_batch(self, queries):
+        """Runs multiple searches in parallel."""
+        tasks = [self.search_single_item(q) for q in queries]
+        return await asyncio.gather(*tasks)
     
     def _save_cookies(self):
         """Saves the current browser cookies to file."""
@@ -816,21 +956,10 @@ class AmazonShopper:
 
     def close(self):
         """Closes the browser."""
-        try:
-            if self.context:
-                self.context.close()
-        except:
-            pass
-            
-        try:
-            if self.playwright:
-                self.playwright.stop()
-        except:
-            pass
-            
-    def stop(self):
-        """Alias for close."""
-        self.close()
+        if self.context:
+            self.context.close()
+        if self.playwright:
+            self.playwright.stop()
 
 if __name__ == "__main__":
     # Test the shopper

@@ -232,4 +232,65 @@ if __name__ == "__main__":
         if result['total_amount']:
             print(f"  Total: {result['total_amount']} {result['total_unit']}")
             print(f"  Range: {format_quantity_range(result['total_amount'], result['total_unit'])}")
+            
+        print(f"  Clean Name: {clean_ingredient_name(test)}")
         print()
+
+def clean_ingredient_name(text):
+    """
+    Removes quantity, unit, and container info to get the raw ingredient name.
+    Example: "1 tablespoon dill" -> "dill"
+             "2 (6 oz) cans tomato paste" -> "tomato paste"
+    """
+    if not text: return ""
+    
+    # 1. Remove complex patterns like "2 (6 oz) cans"
+    # Matches: number + space + (number unit) + space + word
+    complex_pattern = r'(\d+(?:\s+\d+/\d+)?|[¼½¾⅐⅑⅒⅓⅔⅕⅖⅗⅘⅙⅚⅛⅜⅝⅞])\s*\(.*?\)\s*[a-zA-Z]+\s*'
+    text = re.sub(complex_pattern, '', text).strip()
+    
+    # 2. Remove simple quantities and units
+    
+    # Better number pattern including fractions and unicode combos
+    # Matches: "1 1/2", "1 ½", "1/2", "½", "1-2", "1.5", "1"
+    number_pattern = r'^(\d+\s+\d+/\d+|\d+\s*[¼½¾⅐⅑⅒⅓⅔⅕⅖⅗⅘⅙⅚⅛⅜⅝⅞]|\d+/\d+|\d+\.\d+|\d+\s*-\s*\d+|[¼½¾⅐⅑⅒⅓⅔⅕⅖⅗⅘⅙⅚⅛⅜⅝⅞]|\d+)\s*'
+    text = re.sub(number_pattern, '', text).strip()
+    
+    # Remove unit words if they appear at the start now
+    units = list(UNIT_MAPPINGS.keys())
+    units.sort(key=len, reverse=True)
+    
+    # Match unit + optional "of" + space
+    unit_pattern = r'^(' + '|'.join(map(re.escape, units)) + r')\.?(?:s)?\s+(?:of\s+)?'
+    text = re.sub(unit_pattern, '', text, flags=re.IGNORECASE).strip()
+    
+    # NEW: Remove common preparation adjectives and filler words
+    prep_words = [
+        'chopped', 'minced', 'sliced', 'diced', 'crushed', 'ground', 'grated', 'shredded',
+        'cubed', 'peeled', 'cored', 'seeded', 'julienned', 'halved', 'quartered', 
+        'beaten', 'sifted', 'melted', 'softened', 'finely', 'coarsely', 'roughly',
+        'leaves', 'leaf', 'stems' 
+    ]
+    
+    # Remove prep words from start
+    prep_pattern = r'^(' + '|'.join(map(re.escape, prep_words)) + r')\s+'
+    for _ in range(3):
+        text = re.sub(prep_pattern, '', text, flags=re.IGNORECASE).strip()
+        
+    # Remove specific trailing phrases
+    trailing_phrases = [
+        r',\s*divided.*$',
+        r',\s*or to taste.*$',
+        r',\s*plus more.*$',
+        r',\s*to taste.*$',
+        r',\s*optional.*$'
+    ]
+    for pattern in trailing_phrases:
+         text = re.sub(pattern, '', text, flags=re.IGNORECASE).strip()
+         
+    # Remove specific suffixes (words that often appear at the end)
+    suffix_words = ['leaves', 'leaf', 'stems', 'florets', 'spears', 'wedges', 'ribs']
+    suffix_pattern = r'\s+(' + '|'.join(map(re.escape, suffix_words)) + r')$'
+    text = re.sub(suffix_pattern, '', text, flags=re.IGNORECASE).strip()
+    
+    return text

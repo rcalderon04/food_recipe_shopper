@@ -7,18 +7,151 @@ import threading
 import re
 import math
 import time
+import asyncio
 
 # Add parent directory to path to import modules
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from recipe_parser import RecipeParser
-from shopper import AmazonShopper
+from shopper import AmazonShopper, AsyncAmazonShopper
 from matcher import rank_products_by_confidence
 from search_query import create_search_query
-from quantity_parser import parse_quantity
+from quantity_parser import parse_quantity, clean_ingredient_name
 
 app = Flask(__name__)
 CORS(app) # Enable CORS for all routes
+
+@app.route('/')
+def home():
+    return "<h1>Shopping List Tool Backend is Running!</h1><p>API endpoints are available at /api/parse, /api/search, and /api/search-batch.</p>"
+
+@app.route('/api/search-batch', methods=['POST'])
+def search_products_batch():
+    print("=== BATCH SEARCH REQUEST RECEIVED ===")
+    data = request.json
+    queries = data.get('queries', [])
+    headless_req = data.get('headless', True)
+    
+    print(f"Batch request: {len(queries)} items, headless={headless_req}")
+    
+    if not queries:
+        return jsonify({'error': 'Queries list is required'}), 400
+        
+    async def run_batch():
+        print("DEBUG: Inside run_batch")
+        try:
+            shopper = AsyncAmazonShopper(headless=headless_req)
+            print("DEBUG: Shopper initialized")
+            await shopper.start()
+            print("DEBUG: Shopper started")
+            # Ensure user is logged in
+            if not headless_req:
+                print("DEBUG: Checking login status...")
+                login_status = await shopper.login()
+                
+                print(f"DEBUG: Login status result: {login_status}")
+                
+                if login_status == "FAILED":
+                    print("WARNING: User not logged in (timeout), search results may be limited")
+                elif login_status == "FRESH_LOGIN":
+                    print("DEBUG: Fresh login detected. Restarting session to clear bot detection flags...")
+                    await shopper.stop()
+                    await asyncio.sleep(2) # Give it a moment to release file locks
+                    
+                    # Re-initialize clean session
+                    shopper = AsyncAmazonShopper(headless=headless_req)
+                    await shopper.start()
+                    print("DEBUG: Shopper restarted")
+                    
+                    # Verify login again (should be fast now)
+                    await shopper.login()
+
+            # Pre-process queries to remove quantities
+            cleaned_queries = []
+            for q in queries:
+                original = q.get('ingredient', '')
+                if original:
+                    cleaned_name = clean_ingredient_name(original)
+                    print(f"DEBUG: Cleaning '{original}' -> '{cleaned_name}'")
+                    q['query'] = cleaned_name # Shopper uses this key preference
+                
+                if 'storefront' not in q:
+                    q['storefront'] = 'fresh'
+                cleaned_queries.append(q)
+
+            print(f"DEBUG: Calling search_batch with {len(cleaned_queries)} queries")
+            results = await shopper.search_batch(cleaned_queries)
+            print("DEBUG: search_batch returned")
+            
+            return results
+
+        except Exception as inner_e:
+            print(f"DEBUG: Error inside run_batch: {inner_e}")
+            import traceback
+            traceback.print_exc()
+            raise inner_e
+        finally:
+            print("DEBUG: Stopping shopper...")
+            await shopper.stop()
+            print("DEBUG: Shopper stopped")
+            
+    try:
+        # Use asyncio.run to execute async code in sync Flask
+        print("DEBUG: Calling asyncio.run")
+        
+        # Windows specific event loop policy for Playwright
+        if sys.platform == 'win32':
+             asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+             
+        results = asyncio.run(run_batch())
+        print("DEBUG: asyncio.run returned")
+        
+        # Rank and format results for consistency
+        formatted_results = []
+        for res in results:
+            query_text = res.get('query', '')
+            raw_options = res.get('options', [])
+            
+            # Use shared ranking logic if we have options
+            if raw_options:
+                # Rank results
+                ranked = rank_products_by_confidence(query_text, raw_options)
+                top_options = ranked[:4]
+                
+                # Format
+                final_options = []
+                for opt in top_options:
+                    rec = {
+                        'title': opt['title'],
+                        'price': opt['price'],
+                        'asin': opt['asin'],
+                        'url': opt.get('url', ''),
+                        'confidence': opt.get('confidence', 0),
+                        'image': opt.get('image', ''),
+                        'department': opt.get('department', 'Amazon'),
+                        # Note: Quantity recommendation is complex to do here without needed_amount
+                        # For now we'll default to 1, or client can calculate if needed
+                        'quantity_recommendation': 1 
+                    }
+                    final_options.append(rec)
+                    
+                formatted_results.append({'query': query_text, 'options': final_options})
+            else:
+                 formatted_results.append({'query': query_text, 'options': []})
+
+        return jsonify({'results': formatted_results})
+    except BaseException as e:
+        print(f"CRITICAL BATCH SEARCH ERROR: {e}")
+        try:
+            with open('backend_crash.log', 'w') as f:
+                f.write(f"Error: {e}\n")
+                traceback.print_exc(file=f)
+        except:
+             pass
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
 
 # Global shopper instance
 shopper = None

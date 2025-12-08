@@ -802,6 +802,283 @@ class AmazonShopper:
             return None
         except:
             return None
+
+    def stop(self):
+        """Alias for close."""
+        self.close()
+
+from playwright.async_api import async_playwright
+import asyncio
+
+class AsyncAmazonShopper:
+    def __init__(self, headless=False, cookies_file='amazon_cookies.json'):
+        self.headless = headless
+        self.cookies_file = cookies_file
+        self.playwright = None
+        self.browser = None
+        self.context = None
+        
+    async def start(self):
+        """Starts the browser session with a persistent context."""
+        self.playwright = await async_playwright().start()
+        
+        # Use simple persistent context
+        user_data_dir = os.path.join(os.getcwd(), 'chrome_user_data')
+            
+        self.context = await self.playwright.chromium.launch_persistent_context(
+            user_data_dir,
+            headless=self.headless,
+            user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            viewport={'width': 1280, 'height': 720},
+            args=[
+                '--disable-blink-features=AutomationControlled',
+                '--no-sandbox',
+                '--disable-infobars',
+            ]
+        )
+        
+    async def stop(self):
+        try:
+            if self.context:
+                await self.context.close()
+        except:
+            pass
+        try:
+            if self.playwright:
+                await self.playwright.stop()
+        except:
+            pass
+            
+    async def login(self, force_relogin=False):
+        """Navigates to Amazon and waits for user login."""
+        print("Navigating to Amazon Fresh...")
+        # Get first page or create new
+        page = self.context.pages[0] if self.context.pages else await self.context.new_page()
+        
+        # Direct link to Amazon Fresh
+        await page.goto("https://www.amazon.com/alm/storefront?almBrandId=QW1hem9uIEZyZXNo", timeout=30000)
+        
+        # Check if already logged in
+        try:
+            account_element = await page.wait_for_selector('#nav-link-accountList', timeout=5000)
+            if account_element and not force_relogin:
+                account_text = await account_element.inner_text()
+                # Strict check: "Hello, Sign in" means NOT logged in
+                if account_text and 'Hello' in account_text and 'sign in' not in account_text.lower():
+                    print(f"Already logged in: {account_text}")
+                    return "ALREADY_LOGGED_IN"
+                elif account_text and 'Hello' in account_text:
+                     print(f"Not logged in (detected: '{account_text}')")
+        except:
+            pass
+            
+        print("\n" + "="*60)
+        print("⚠️  NOT LOGGED IN TO AMAZON")
+        print("Please log in to your Amazon account in the browser window.")
+        print("The session will be saved for future use.")
+        print("="*60 + "\n")
+        
+        # Wait for login loop
+        max_wait = 300 # Increase to 5 minutes to give user time
+        for i in range(max_wait):
+            await asyncio.sleep(1)
+            try:
+                account_element = await page.wait_for_selector('#nav-link-accountList', timeout=1000)
+                if account_element:
+                    account_text = await account_element.inner_text()
+                    # Same strict check here
+                    if account_text and 'Hello' in account_text and 'sign in' not in account_text.lower():
+                        print(f"✓ Login detected: {account_text}")
+                        await asyncio.sleep(2) 
+                        return "FRESH_LOGIN"
+            except:
+                continue
+                
+        print("⚠️  Login timeout - proceeding anyway (search might fail)")
+        return "FAILED"
+
+    async def search_single_item(self, item_data):
+        """Searches for a single item in a new page."""
+        query = item_data.get('query') or item_data.get('ingredient')
+        storefront = item_data.get('storefront', 'fresh')
+        
+        page = await self.context.new_page()
+        results = []
+        
+        try:
+            # Storefront URLs
+            store_urls = {
+                'fresh': "https://www.amazon.com/alm/storefront?almBrandId=QW1hem9uIEZyZXNo",
+                'wholefoods': "https://www.amazon.com/alm/storefront?almBrandId=V2hvbGUgRm9vZHM=",
+                'amazon': "https://www.amazon.com/"
+            }
+            target_url = store_urls.get(storefront, store_urls['fresh'])
+            
+            await page.goto(target_url, timeout=30000)
+            print(f"DEBUG [{query}]: Navigated to {target_url}")
+            
+            # Wait for page to stabilize
+            await asyncio.sleep(1)
+            current_url = page.url
+            print(f"DEBUG [{query}]: Current URL after navigation: {current_url}")
+            
+            # Select Department (Critical for staying in Fresh/Whole Foods)
+            if storefront in ['fresh', 'wholefoods']:
+                try:
+                    dropdown = await page.wait_for_selector('select#searchDropdownBox', timeout=5000)
+                    if dropdown:
+                        # Get current value
+                        current_val = await dropdown.evaluate('el => el.value')
+                        print(f"DEBUG [{query}]: Dropdown current value: {current_val}")
+                        
+                        # Try selecting by value first (most reliable)
+                        selected = False
+                        if storefront == 'fresh':
+                            # Try common Fresh values
+                            for val in ['search-alias=amazonfresh', 'search-alias=amazon-fresh', 'amazonfresh']:
+                                try:
+                                    await dropdown.select_option(value=val)
+                                    print(f"DEBUG [{query}]: Selected Fresh department with value: {val}")
+                                    selected = True
+                                    break
+                                except: continue
+                        elif storefront == 'wholefoods':
+                            for val in ['search-alias=wholefoods', 'search-alias=whole-foods', 'wholefoods']:
+                                try:
+                                    await dropdown.select_option(value=val)
+                                    print(f"DEBUG [{query}]: Selected Whole Foods department with value: {val}")
+                                    selected = True
+                                    break
+                                except: continue
+                        
+                        if not selected:
+                            print(f"DEBUG [{query}]: WARNING - Could not select department dropdown")
+                    else:
+                        print(f"DEBUG [{query}]: Dropdown found but not accessible")
+                except Exception as e:
+                    print(f"DEBUG [{query}]: Department selection failed: {e}")
+
+            # Search
+            try:
+                search_box = await page.wait_for_selector('input[id="twotabsearchtextbox"]', timeout=15000)
+                if search_box:
+                     await search_box.fill(query)
+                     await search_box.press('Enter')
+                     await page.wait_for_load_state('domcontentloaded')
+                     
+                     # Check URL after search
+                     await asyncio.sleep(1)
+                     search_result_url = page.url
+                     print(f"DEBUG [{query}]: URL after search: {search_result_url}")
+                     
+                     # Verify we're still in the correct storefront
+                     if storefront == 'fresh' and 'almBrandId=QW1hem9uIEZyZXNo' not in search_result_url and 'amazonfresh' not in search_result_url.lower():
+                         print(f"DEBUG [{query}]: WARNING - Search escaped Fresh context!")
+                     elif storefront == 'wholefoods' and 'almBrandId=V2hvbGUgRm9vZHM=' not in search_result_url and 'wholefoods' not in search_result_url.lower():
+                         print(f"DEBUG [{query}]: WARNING - Search escaped Whole Foods context!")
+            except:
+                return {'query': query, 'options': []}
+                
+            # Extract
+            await asyncio.sleep(1) # Wait for dynamic load
+            
+            # Robust extraction strategy
+            items = []
+            
+            # Try multiple selectors
+            result_selectors = [
+                'div.s-result-item[data-asin]',
+                'div[data-component-type="s-search-result"]',
+                'div.s-search-result',
+                '[data-asin]:not([data-asin=""])'
+            ]
+            
+            for selector in result_selectors:
+                try:
+                    items = await page.query_selector_all(selector)
+                    if items: break
+                except: continue
+            
+            if not items:
+                print(f"DEBUG: No items found for '{query}' using selectors")
+                return {'query': query, 'options': []}
+                
+            for item in items[:4]:
+                asin = await item.get_attribute('data-asin')
+                if not asin: continue
+                
+                # Extract actual product URL from the search result link
+                # This preserves critical parameters like smid (seller ID) and fpw (Fresh-specific)
+                product_url = None
+                try:
+                    # Try to find the product link in the search result
+                    link_selectors = [
+                        'h2 a',
+                        'a.a-link-normal[href*="/dp/"]',
+                        f'a[href*="{asin}"]'
+                    ]
+                    for link_sel in link_selectors:
+                        link_el = await item.query_selector(link_sel)
+                        if link_el:
+                            href = await link_el.get_attribute('href')
+                            if href:
+                                # Make it absolute if needed
+                                if href.startswith('http'):
+                                    product_url = href
+                                elif href.startswith('/'):
+                                    product_url = f"https://www.amazon.com{href}"
+                                else:
+                                    product_url = f"https://www.amazon.com/{href}"
+                                break
+                except Exception as e:
+                    print(f"DEBUG [{query}]: Error extracting product URL: {e}")
+                
+                # Fallback: construct URL with Fresh parameters if extraction failed
+                if not product_url:
+                    product_url = f"https://www.amazon.com/dp/{asin}"
+                    if storefront == 'fresh':
+                         product_url += "?almBrandId=QW1hem9uIEZyZXNo"
+                    elif storefront == 'wholefoods':
+                         product_url += "?almBrandId=V2hvbGUgRm9vZHM="
+                
+                title_el = await item.query_selector('h2 span')
+                title = await title_el.inner_text() if title_el else "Unknown"
+                
+                price_el = await item.query_selector('.a-price .a-offscreen')
+                price = await price_el.inner_text() if price_el else "N/A"
+                price = price.replace('$', '').strip()
+                
+                # Image
+                img_el = await item.query_selector('img.s-image')
+                image_url = await img_el.get_attribute('src') if img_el else ""
+                
+                # Department logic
+                department = "Amazon"
+                if storefront == 'fresh': department = "Amazon Fresh"
+                elif storefront == 'wholefoods': department = "Whole Foods"
+                
+                print(f"DEBUG [{query}]: Product URL for {title[:30]}...: {product_url}")
+                
+                results.append({
+                    'title': title,
+                    'price': price,
+                    'asin': asin,
+                    'image': image_url,
+                    'department': department,
+                    'url': product_url
+                })
+                
+        except Exception as e:
+            print(f"Error searching {query}: {e}")
+        finally:
+            await page.close()
+            
+        return {'query': query, 'options': results}
+
+    async def search_batch(self, queries):
+        """Runs multiple searches in parallel."""
+        tasks = [self.search_single_item(q) for q in queries]
+        return await asyncio.gather(*tasks)
     
     def _save_cookies(self):
         """Saves the current browser cookies to file."""
