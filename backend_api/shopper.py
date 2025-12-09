@@ -1003,7 +1003,8 @@ class AsyncAmazonShopper:
                 print(f"DEBUG: No items found for '{query}' using selectors")
                 return {'query': query, 'options': []}
                 
-            for item in items[:4]:
+            # Process up to 10 items to find 4 valid products (with prices)
+            for item in items[:10]:
                 asin = await item.get_attribute('data-asin')
                 if not asin: continue
                 
@@ -1048,6 +1049,11 @@ class AsyncAmazonShopper:
                 price = await price_el.inner_text() if price_el else "N/A"
                 price = price.replace('$', '').strip()
                 
+                # Skip products with N/A price (unavailable)
+                if price == "N/A" or not price:
+                    print(f"DEBUG [{query}]: Skipping unavailable product: {title[:40]}...")
+                    continue
+                
                 # Image
                 img_el = await item.query_selector('img.s-image')
                 image_url = await img_el.get_attribute('src') if img_el else ""
@@ -1067,6 +1073,10 @@ class AsyncAmazonShopper:
                     'department': department,
                     'url': product_url
                 })
+                
+                # Stop after finding 4 valid products
+                if len(results) >= 4:
+                    break
                 
         except Exception as e:
             print(f"Error searching {query}: {e}")

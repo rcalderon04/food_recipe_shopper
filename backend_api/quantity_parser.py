@@ -244,10 +244,25 @@ def clean_ingredient_name(text):
     """
     if not text: return ""
     
-    # 1. Remove complex patterns like "2 (6 oz) cans"
-    # Matches: number + space + (number unit) + space + word
-    complex_pattern = r'(\d+(?:\s+\d+/\d+)?|[¼½¾⅐⅑⅒⅓⅔⅕⅖⅗⅘⅙⅚⅛⅜⅝⅞])\s*\(.*?\)\s*[a-zA-Z]+\s*'
-    text = re.sub(complex_pattern, '', text).strip()
+    # 1. Remove complex patterns like "2 (6 oz) cans" but preserve "can/canned"
+    # First, check if the text contains "can" or "canned" as a container word
+    has_can_container = bool(re.search(r'\b(can|cans|canned)\b', text, re.IGNORECASE))
+    
+    # If we have "can/canned", convert to "canned" FIRST, then remove quantities
+    if has_can_container:
+        # Step 1: Convert "X cans" or "X can" to just "canned" (remove quantity + container)
+        text = re.sub(r'(\d+(?:\s+\d+/\d+)?|[¼½¾⅐⅑⅒⅓⅔⅕⅖⅗⅘⅙⅚⅛⅜⅝⅞])\s*\(.*?\)\s*(cans?)\s+', r'canned ', text, flags=re.IGNORECASE).strip()
+        text = re.sub(r'^\d+\s+(cans?)\s+', r'canned ', text, flags=re.IGNORECASE).strip()
+        # Step 2: Convert any remaining "can" or "cans" to "canned"
+        text = re.sub(r'\b(cans?)\b', 'canned', text, flags=re.IGNORECASE).strip()
+        # Step 3: Remove duplicate "canned canned" if it occurs
+        text = re.sub(r'\b(canned)\s+\1\b', r'\1', text, flags=re.IGNORECASE).strip()
+    else:
+        # Only apply complex pattern removal if we don't have can/canned
+        # Matches: number + space + (number unit) + space + word
+        complex_pattern = r'(\d+(?:\s+\d+/\d+)?|[¼½¾⅐⅑⅒⅓⅔⅕⅖⅗⅘⅙⅚⅛⅜⅝⅞])\s*\(.*?\)\s*[a-zA-Z]+\s*'
+        text = re.sub(complex_pattern, '', text).strip()
+    
     
     # 2. Remove simple quantities and units
     
@@ -265,17 +280,20 @@ def clean_ingredient_name(text):
     text = re.sub(unit_pattern, '', text, flags=re.IGNORECASE).strip()
     
     # NEW: Remove common preparation adjectives and filler words
-    prep_words = [
-        'chopped', 'minced', 'sliced', 'diced', 'crushed', 'ground', 'grated', 'shredded',
-        'cubed', 'peeled', 'cored', 'seeded', 'julienned', 'halved', 'quartered', 
-        'beaten', 'sifted', 'melted', 'softened', 'finely', 'coarsely', 'roughly',
-        'leaves', 'leaf', 'stems' 
-    ]
-    
-    # Remove prep words from start
-    prep_pattern = r'^(' + '|'.join(map(re.escape, prep_words)) + r')\s+'
-    for _ in range(3):
-        text = re.sub(prep_pattern, '', text, flags=re.IGNORECASE).strip()
+    # BUT: Skip this if we have "canned" in the text (preserve descriptors after "canned")
+    if not has_can_container:
+        prep_words = [
+            'chopped', 'minced', 'sliced', 'diced', 'crushed', 'ground', 'grated', 'shredded',
+            'cubed', 'peeled', 'cored', 'seeded', 'julienned', 'halved', 'quartered', 
+            'beaten', 'sifted', 'melted', 'softened', 'finely', 'coarsely', 'roughly',
+            'leaves', 'leaf', 'stems' 
+        ]
+        
+        # Remove prep words from start
+        prep_pattern = r'^(' + '|'.join(map(re.escape, prep_words)) + r')\s+'
+        for _ in range(3):
+            text = re.sub(prep_pattern, '', text, flags=re.IGNORECASE).strip()
+        
         
     # Remove specific trailing phrases
     trailing_phrases = [
