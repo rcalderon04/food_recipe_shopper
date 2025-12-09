@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="utf-8">
+    <title>Test Amazon AFX Endpoint</title>
+</head>
+
+<body>
+    <h1>Testing Amazon AFX Ingredients API</h1>
+    <p>Click the button to test if the endpoint exists:</p>
+
+    <button onclick="document.getElementById('afxForm').submit();">Test AFX Endpoint</button>
+
+    <form id="afxForm" method="POST" action="https://www.amazon.com/afx/ingredients/landing">
+        <input type="hidden" name="ingredients"
+            value='{"ingredients":[{"name":"butter","quantityList":[{"unit":"COUNT","amount":1}]},{"name":"onion","quantityList":[{"unit":"COUNT","amount":1}]},{"name":"garlic","quantityList":[{"unit":"COUNT","amount":1}]}]}'>
+        <input type="hidden" name="brand" value="Whole Foods">
+        <input type="hidden" name="almBrandId" value="VUZHIFdob2xlIEZvb2Rz">
+    </form>
+
+    <h2>Test Data:</h2>
+    <pre>
+POST https://www.amazon.com/afx/ingredients/landing
+
+Payload:
+{
+  "ingredients": [
+    {"name": "butter", "quantityList": [{"unit": "COUNT", "amount": 1}]},
+    {"name": "onion", "quantityList": [{"unit": "COUNT", "amount": 1}]},
+    {"name": "garlic", "quantityList": [{"unit": "COUNT", "amount": 1}]}
+  ]
+}
+
+brand: "Whole Foods"
+almBrandId: "VUZHIFdob2xlIEZvb2Rz"
+    </pre>
+</body>
+
+</html>
